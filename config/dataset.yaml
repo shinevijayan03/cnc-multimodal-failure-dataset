@@ -1,0 +1,234 @@
+# =============================================================================
+# dataset.yaml  —  Recipe A pipeline configuration (Phase-1 STUB)
+# -----------------------------------------------------------------------------
+# This is the single source of truth for every tunable knob in the pipeline.
+# Phase 1: values here are PROPOSED DEFAULTS for design review. They are not yet
+# consumed by code. Treat anything marked `# TODO(review)` as an open decision.
+#
+# Conventions:
+#   * All paths are relative to the repository root unless absolute.
+#   * All durations are in SECONDS unless the key name says otherwise.
+#   * All frequencies are in HERTZ.
+#   * `null` means "auto-detect" or "not yet decided".
+# =============================================================================
+
+version: 0.1.0            # config schema version; bump on breaking changes
+random_seed: 1337         # global seed for any stochastic step (split, sampling)
+
+# -----------------------------------------------------------------------------
+# 1. Paths — where raw inputs live and where processed artifacts are written.
+# -----------------------------------------------------------------------------
+paths:
+  data_raw: data_raw
+  data_processed: data_processed
+
+  # Per-modality raw input roots (user populates these manually).
+  raw_sensor_root: data_raw            # each dataset is a subfolder below
+  raw_video_root: data_raw/video_raw
+  raw_text_root: data_raw/text_manuals
+
+  # Processed outputs.
+  sensor_windows_dir: data_processed/sensor_windows      # per-incident parquet
+  sensor_index: data_processed/sensor_windows.parquet
+  video_dir: data_processed/video                        # normalized clips
+  video_index: data_processed/video_index.parquet
+  text_chunks: data_processed/text_chunks.parquet
+  incidents_index: data_processed/incidents.parquet
+
+  logs_dir: logs
+
+# -----------------------------------------------------------------------------
+# 2. Sensor ETL — normalization, sampling-rate estimation, event detection,
+#    incident windowing.
+# -----------------------------------------------------------------------------
+sensor:
+  # Each entry describes one raw dataset and how to read it. The `reader`
+  # selects a parsing strategy implemented in sensor_etl. `column_map` maps
+  # source column names -> canonical schema names.
+  datasets:
+    - name: bosch_cnc
+      enabled: true
+      path: data_raw/bosch_cnc
+      reader: bosch_h5            # TODO(review): confirm raw format (.h5 vs .csv)
+      machine_family: cnc_mill
+      fs_hz: null                 # null => estimate from timestamps/metadata
+      column_map: { ax: X, ay: Y, az: Z }
+
+    - name: kaggle_cnc
+      enabled: true
+      path: data_raw/kaggle_cnc
+      reader: generic_csv
+      machine_family: cnc_mill
+      fs_hz: 2000                 # Bosch-style CNC accel corpus is sampled at 2 kHz;
+                                  # files carry no time column, so fs is fixed here.
+      column_map: { x: ax, y: ay, z: az }   # tri-axial accelerometer -> canonical
+      # Files live under M*/OP*/{good,bad}/*.csv; the good/bad folder is surfaced as
+      # run metadata (quality label) by the generic_csv reader.
+
+    - name: cnc_mill_tool_wear
+      enabled: false             # DISABLED: this file is aggregated *features*
+                                  # (CF_/Vib_/AE_Feature_*, VB_mm, Wear_Class), not a
+                                  # raw waveform, so RMS windowing does not apply.
+      path: data_raw/cnc_mill_tool_wear
+      reader: generic_csv
+      machine_family: cnc_mill
+      fs_hz: null
+      column_map: {}
+
+    - name: multi_sensor_cnc
+      enabled: false             # optional multi-channel (force) dataset
+      path: data_raw/multi_sensor_cnc
+      reader: generic_csv
+      machine_family: cnc_mill
+      fs_hz: null
+      column_map: {}
+
+    - name: milling_lifecycle
+      enabled: false
+      path: data_raw/milling_lifecycle
+      reader: generic_csv
+      machine_family: cnc_mill
+      fs_hz: null
+      column_map: {}
+
+  # Canonical schema the normalizer must produce.
+  canonical_channels: [time_s, ax, ay, az]      # ae, sound, force_* are optional
+  optional_channels: [ae, sound, force_x, force_y, force_z, spindle_current]
+
+  # Sampling-rate estimation.
+  fs_estimation:
+    method: median_dt          # median_dt | metadata | fixed
+    min_plausible_hz: 100
+    max_plausible_hz: 100000
+    resample_to_hz: null       # null => keep native fs; else resample
+
+  # Event detection (sliding-window RMS thresholding is the default heuristic).
+  event_detection:
+    method: rms_threshold      # rms_threshold | energy_zscore | manual_labels
+    channel_for_energy: az     # which channel drives detection; or "magnitude"
+    window_s: 1.0              # RMS window length
+    hop_s: 0.25               # RMS hop / stride
+    # NOTE (data-driven tuning): the staged Bosch-style corpus is CONTINUOUS
+    # machining, so the "event" is the sustained cut, not a transient spike. A
+    # zscore-vs-rolling-baseline detector (threshold_kind: zscore, value 3.0)
+    # finds 0 events here because the cut is its own baseline. `quantile` flags
+    # the high-energy cutting passages (RMS above the 80th percentile), which is
+    # the right anchor for this data. Switch back to zscore for transient-style
+    # datasets. See evaluation_criteria.md §9 (iteration loop) and overview §8.2.
+    threshold_kind: quantile   # zscore | absolute | quantile
+    threshold_value: 0.80      # quantile: flag RMS above this fraction
+    baseline_window_s: 30.0    # rolling baseline length (used by zscore mode)
+    min_event_separation_s: 10.0   # merge events closer than this (separate cuts)
+    min_event_duration_s: 2.0      # discard blips shorter than this
+
+  # Incident windowing around each detected event.
+  windowing:
+    pre_event_s: 60.0          # [-60s, +30s] window per the spec
+    post_event_s: 30.0
+    drop_partial_windows: true # drop windows that run off the recording edge
+    max_windows_per_run: null  # null => unlimited; cap to avoid over-sampling
+
+  # Sensor evidence spans (heuristic v1): the interval(s) that exceeded threshold.
+  evidence_spans:
+    method: threshold_crossings   # threshold_crossings | top_k_energy
+    pad_s: 1.0                     # pad each span by this many seconds
+    max_spans: 5
+
+  output_format: parquet       # parquet | hdf5  (TODO(review))
+
+  # Dataset-scale target (informational; checked in evaluation, not enforced here).
+  target_total_incident_hours: 72
+
+# -----------------------------------------------------------------------------
+# 3. Video ETL — normalization + index + tagging.
+# -----------------------------------------------------------------------------
+video:
+  normalize:
+    enabled: true
+    target_height: 720
+    target_fps: 30
+    target_codec: libx264
+    container: mp4
+    clip_min_s: 5
+    clip_max_s: 10
+    ffmpeg_path: ffmpeg        # assume on PATH
+    overwrite: false
+
+  # Controlled vocabularies for tagging (CSV-driven workflow).
+  regime_labels: [roughing, finishing, plunge, idle, drilling, contouring]
+  condition_labels: [normal, tool_wear_visible, heavy_vibration, coolant_issue, chatter, chip_packing]
+  tagging_csv: data_raw/video_raw/video_tags.csv   # user-edited; merged into index
+
+  target_clip_count: 1000
+
+# -----------------------------------------------------------------------------
+# 4. Text ETL — manual parsing + chunking + keyword tagging.
+# -----------------------------------------------------------------------------
+text:
+  input_formats: [md, markdown, txt, docx, pdf]   # pdf added: staged manuals are PDF
+  chunking:
+    target_tokens: 175         # ~150-200 token target
+    min_tokens: 80
+    max_tokens: 220
+    overlap_tokens: 20
+    respect_headings: true     # do not split across heading boundaries
+    tokenizer: tiktoken_cl100k # tiktoken_cl100k | whitespace  (TODO(review))
+
+  doc_types: [sop, maintenance]
+  # Keyword -> topic tag map for retrieval targeting. Extend freely.
+  topic_keywords:
+    vibration: [vibration, chatter, oscillation, resonance, amplitude]
+    tool_wear: [tool wear, worn, flank wear, dull, edge breakdown]
+    clamping: [clamp, fixture, workholding, vise, runout]
+    coolant: [coolant, lubricant, flood, mist, overheating]
+    spindle: [spindle, bearing, rpm, runout]
+    feed_speed: [feed rate, spindle speed, depth of cut, doc]
+
+  target_pages_equivalent: 350   # informational only
+
+# -----------------------------------------------------------------------------
+# 5. Incident assembly — cross-modal linking.
+# -----------------------------------------------------------------------------
+assemble:
+  # Video selection: pick a clip whose coarse labels match the incident.
+  video_match:
+    strategy: label_match      # label_match | random_within_regime
+    require_regime_match: true
+    require_condition_match: false   # softer; condition is harder to map
+    allow_reuse: true          # may a clip serve multiple incidents?
+    fallback_to_idle: true
+
+  # Text retrieval: how many chunks of each type to attach.
+  text_retrieval:
+    method: keyword_bm25       # keyword_bm25 | embedding (Phase-2+)
+    sop_chunks_min: 1
+    sop_chunks_max: 3
+    maintenance_chunks_min: 1
+    maintenance_chunks_max: 3
+    # Map failure_family -> topic tags used to query chunks.
+    failure_to_topics:
+      tool_wear: [tool_wear, vibration, feed_speed]
+      chatter: [vibration, spindle, feed_speed]
+      clamping_loss: [clamping, vibration]
+      coolant_fault: [coolant, spindle]
+      unknown: [vibration, tool_wear]
+
+  # Labels we attempt to fill per incident (derived or defaulted).
+  label_fields: [phase_label, regime_label, severity_label, root_cause_label]
+  default_label: unknown
+
+  # Train / val / test / human_eval split.
+  split:
+    strategy: grouped_by_source   # avoid leakage across the same raw run
+    fractions: { train: 0.7, val: 0.15, test: 0.10, human_eval: 0.05 }
+    group_key: source_dataset
+
+# -----------------------------------------------------------------------------
+# 6. Logging / run control.
+# -----------------------------------------------------------------------------
+runtime:
+  log_level: INFO              # DEBUG | INFO | WARNING | ERROR
+  log_format: json             # json | text
+  fail_fast: false             # if true, abort whole run on first bad file
+  num_workers: 1               # parallelism for per-file ETL (Phase-2+)
+  dry_run: false               # parse + validate but do not write outputs

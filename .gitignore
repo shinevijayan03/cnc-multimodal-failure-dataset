@@ -1,0 +1,33 @@
+# --- Raw + processed data (large / licensed; never committed) ---
+data_raw/**
+!data_raw/**/.gitkeep
+data_processed/**
+!data_processed/**/.gitkeep
+logs/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# --- Local archives / large blobs (never committed) ---
+archive*/
+*.zip
+*.7z
+*.tar
+*.tar.gz

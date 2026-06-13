@@ -1,0 +1,27 @@
+# Core runtime dependencies for the Recipe A pipeline.
+# Install with:  python -m pip install -r requirements.txt
+pydantic>=2.5
+pyyaml>=6.0
+pandas>=2.0
+pyarrow>=12.0
+numpy>=1.24
+scipy>=1.10
+typer>=0.9
+
+# --- Text ETL (optional but recommended; pipeline degrades gracefully) ---
+tiktoken>=0.5        # accurate token counts; whitespace fallback if absent
+pypdf>=4.0           # read staged PDF manuals; skipped+logged if absent
+python-docx>=1.1     # read .docx manuals; skipped+logged if absent
+
+# --- Incident assembly (optional) ---
+rank-bm25>=0.2       # BM25 text retrieval; keyword-overlap fallback if absent
+
+# --- Evaluation / reporting (optional) ---
+matplotlib>=3.7
+
+# --- Dev / test ---
+pytest>=7.4
+pytest-cov>=4.1
+
+# NOTE: ffmpeg/ffprobe are EXTERNAL binaries (not pip-installable). The video
+# stage requires them on PATH; if missing it is skipped with an install hint.
