@@ -1,0 +1,40 @@
+flowchart LR
+    raw_sensor["data_raw/<sensor datasets>"] --> sensor["src.etl.sensor_etl"]
+    raw_text["data_raw/text_manuals"] --> text["src.etl.text_etl"]
+    raw_video["data_raw/video_raw + video_tags.csv"] --> video["src.etl.video_etl"]
+
+    cfg["config/dataset.yaml"] --> cli["src.cli Typer commands"]
+    cfg --> sensor
+    cfg --> text
+    cfg --> video
+    cfg --> assemble["src.etl.assemble_incidents"]
+
+    cli --> sensor
+    cli --> text
+    cli --> video
+    cli --> assemble
+
+    sensor --> sensor_index["data_processed/sensor_windows.parquet"]
+    sensor --> sensor_files["data_processed/sensor_windows/*.parquet"]
+    text --> text_index["data_processed/text_chunks.parquet"]
+    video --> video_files["data_processed/video/*.mp4"]
+    video --> video_index["data_processed/video_index.parquet"]
+
+    sensor_index --> assemble
+    sensor_files --> assemble
+    text_index --> assemble
+    video_index --> assemble
+    video_files --> assemble
+
+    assemble --> incidents["data_processed/incidents.parquet"]
+    incidents --> eval["src.evaluate / src.cli evaluate"]
+    sensor_index --> eval
+    text_index --> eval
+    video_index --> eval
+    eval --> reports["data_processed/eval_report.json + eval_report.md"]
+
+    common["src.common config/schemas/io/logging/ids/errors"] --> sensor
+    common --> text
+    common --> video
+    common --> assemble
+    common --> eval

@@ -19,8 +19,9 @@ staged data produces a valid `incidents.parquet`.
 | Phase | Scope | State |
 |-------|-------|-------|
 | 1 | Understanding, architecture, software design, test & eval strategy | ✅ approved |
-| 2 | Implement `sensor_etl`, `video_etl`, `text_etl`, `assemble_incidents` + tests | ✅ done (76 tests green, ~80% cov) |
-| 3 | Scale to thesis targets + iterate on evaluation metrics | ⏳ in progress |
+| 2 | Implement `sensor_etl`, `video_etl`, `text_etl`, `assemble_incidents` + tests | ✅ done (106 tests green, 80% cov) |
+| 3 | Scale to thesis targets + iterate on evaluation metrics | ✅ demo baseline PASS; real semantic labels still require curation |
+| 4 | TGFX contract/eval/data substrate before model code | ⏳ T-01 and T-04..T-06 complete; T-02/T-03 substrate seeded |
 
 ## Quickstart
 
@@ -28,6 +29,7 @@ staged data produces a valid `incidents.parquet`.
 python -m pip install -r requirements.txt          # ffmpeg must be installed separately for video
 python -m src.cli all --config config/dataset.yaml # sensor -> text -> video -> assemble
 python -m src.cli evaluate --tier mvp              # grade PASS/WARN/FAIL + write eval_report.{json,md}
+streamlit run streamlit_app.py                     # browse aligned incident evidence
 ```
 
 Per-stage (each supports `--limit N` and `--dry-run`):
@@ -40,11 +42,38 @@ python -m src.cli assemble             # join the three indices -> incidents.par
 pytest -q                              # run the test suite
 ```
 
+## Streamlit incident explorer
+
+After `incidents.parquet` exists, launch:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+The app reads `data_pipeline/data_processed` by default and lets you choose an
+incident from a dropdown, then inspect the vibration window, linked video,
+retrieved SOP/maintenance chunks, and the alignment summary.
+
 > **Demo-build note.** The staged Bosch-style corpus is *continuous machining*,
 > so `config/dataset.yaml` uses `event_detection.threshold_kind: quantile`
 > (the cut itself is the "event") rather than the z-score-for-transients default.
-> Without ffmpeg the video stage is skipped, so demo incidents have no video link
-> (an honest WARN in the evaluation, recorded per row via `alignment_method`).
+> Current staged artifacts include linked videos and evaluate as MVP `PASS`.
+> Failure/severity/root-cause labels are weak deterministic scaffolding derived
+> from existing incident IDs for demo balance, not curated semantic ground truth.
+> Treat final thesis-quality label claims as pending until source labels are
+> curated and provenance is reviewed.
+
+## Current validation snapshot
+
+Verified locally on 2026-07-02:
+
+```bash
+pytest -q --cov=src --cov=contracts --cov-report=term-missing  # 106 passed, 1 skipped, 80% coverage
+ruff check src tests contracts scripts                         # all checks passed
+python -m compileall -q src contracts scripts streamlit_app.py  # passed
+python -m src.cli evaluate --config config/dataset.yaml --tier mvp  # GRADE: PASS
+python scripts/build_dataset.py --config config/dataset.yaml    # TGFX manifest/ledger/splits
+```
 
 ## Design documents (read in this order)
 

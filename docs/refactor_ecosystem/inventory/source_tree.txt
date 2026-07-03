@@ -1,0 +1,98 @@
+Repository source tree captured during Stage A discovery.
+
+Root:
+E:\1.Final-Year-Project-2026\1. Mid-Report\cnc-multimodal-failure-dataset
+
+Tracked project files:
+.github/workflows/ci.yml
+.gitignore
+CONTRIBUTING.md
+LICENSE
+README.md
+config/dataset.yaml
+docs/architecture.md
+docs/evaluation_criteria.md
+docs/implementation_plan.md
+docs/recipe_a_overview.md
+docs/software_design.md
+docs/test_cases.md
+docs/test_strategy_and_plan.md
+notebooks/.gitkeep
+pyproject.toml
+requirements.txt
+src/__init__.py
+src/cli.py
+src/common/.gitkeep
+src/common/__init__.py
+src/common/config.py
+src/common/errors.py
+src/common/ids.py
+src/common/io_utils.py
+src/common/logging_utils.py
+src/common/schemas.py
+src/etl/.gitkeep
+src/etl/__init__.py
+src/etl/assemble_incidents.py
+src/etl/sensor_etl.py
+src/etl/text_etl.py
+src/etl/video_etl.py
+src/evaluate.py
+tests/__init__.py
+tests/conftest.py
+tests/fixtures/.gitkeep
+tests/integration/.gitkeep
+tests/integration/__init__.py
+tests/integration/test_integration.py
+tests/unit/.gitkeep
+tests/unit/__init__.py
+tests/unit/test_assemble.py
+tests/unit/test_config.py
+tests/unit/test_io_ids.py
+tests/unit/test_schemas.py
+tests/unit/test_sensor.py
+tests/unit/test_text.py
+tests/unit/test_video.py
+
+Generated Stage A artifact tree:
+docs/refactor_ecosystem/
+  00_EXECUTION_SUMMARY.md
+  01_CODEBASE_INVENTORY.md
+  02_MODULE_BREAKDOWN.md
+  03_ARCHITECTURE_DOCUMENT.md
+  04_SOFTWARE_DESIGN_DOCUMENT.md
+  05_MARKDOWN_REFACTORING_PLAN.md
+  06_STREAMLIT_UI_DESIGN.md
+  07_GPU_ENABLEMENT_PLAN.md
+  08_INTEGRATION_TESTING_AND_VALIDATION_PLAN.md
+  09_TEST_CASES.md
+  10_VALIDATION_MATRIX.md
+  11_OPEN_ITEMS_AND_PENDING_TASKS.md
+  12_NEXT_STEPS_TO_COMPLETE_SOLUTION.md
+  13_PHASED_IMPLEMENTATION_ROADMAP.md
+  99_REVIEW_AND_APPROVAL_CHECKLIST.md
+  CHANGELOG_CODEX_REFACTOR.md
+  markdown_audit.md
+  inventory/
+    source_tree.txt
+    dependency_inventory.md
+    config_inventory.md
+    test_inventory.md
+    gpu_readiness_inventory.md
+    gpu_environment_report.md
+  diagrams/
+    current_architecture.mmd
+    target_architecture.mmd
+    module_dependency_graph.mmd
+    runtime_flow.mmd
+    data_flow.mmd
+
+Gitignored runtime/data folders expected by the pipeline:
+data_raw/
+data_processed/
+logs/
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+htmlcov/

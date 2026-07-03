@@ -258,6 +258,19 @@ class EventDetector:
     def detect(self, df: pd.DataFrame, fs_hz: float, cfg: EventDetectionCfg | None = None
                ) -> list[Event]:
         cfg = cfg or self.cfg
+        if cfg.method == "segment_center":
+            t = df["time_s"].to_numpy()
+            if t.size == 0:
+                return []
+            t_start = float(t[0])
+            t_end = float(t[-1])
+            return [Event(
+                t_event_s=(t_start + t_end) / 2.0,
+                t_start_s=t_start,
+                t_end_s=t_end,
+                score=1.0,
+            )]
+
         x = self._energy_channel(df)
         rms, centers = self._sliding_rms(x, fs_hz)
         if rms.size == 0:
@@ -412,6 +425,13 @@ class SensorETL:
         self.carver = WindowCarver()
         self.spanner = EvidenceSpanExtractor(s.evidence_spans)
 
+    def _repo_relative(self, path: Path) -> str:
+        root = Path(self.cfg.repo_root) if self.cfg.repo_root else Path.cwd()
+        try:
+            return path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return str(path)
+
     def run(self, limit: int | None = None, dry_run: bool | None = None) -> RunSummary:
         dry_run = self.cfg.runtime.dry_run if dry_run is None else dry_run
         summ = RunSummary(stage="sensor", dry_run=dry_run)
@@ -490,8 +510,8 @@ class SensorETL:
                 continue
             spans = self.spanner.extract(window, ev, s.evidence_spans)
             inc_id = incident_id(dscfg.name, run.run_id, ev.t_event_s)
-            rel_file = f"{Path(self.cfg.paths.sensor_windows_dir).name}/{inc_id}.parquet"
-            sensor_file = (Path(self.cfg.paths.data_processed).name + "/" + rel_file)
+            out_path = windows_dir / f"{inc_id}.parquet"
+            sensor_file = self._repo_relative(out_path)
             row = SensorWindowRow(
                 incident_id=inc_id,
                 source_dataset=dscfg.name,
@@ -507,7 +527,6 @@ class SensorETL:
             )
             rows.append(row)
             if not dry_run:
-                out_path = windows_dir / f"{inc_id}.parquet"
                 src = Path(run.meta.get("source_file", "")) if run.meta.get("source_file") else None
                 if src and exists_and_fresh(out_path, src):
                     summ.bump("skipped")  # idempotent: already built from same source

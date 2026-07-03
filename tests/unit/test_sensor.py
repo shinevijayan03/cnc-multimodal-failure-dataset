@@ -120,6 +120,13 @@ def test_threshold_monotonicity():  # UT-SENS-11
     assert high <= low
 
 
+def test_segment_center_event_mode():  # UT-SENS-16
+    df = _normalize(make_bursts_df(dur=20.0, burst_times=(10.0,)), fs=2000.0)
+    events = EventDetector(_detect_cfg(method="segment_center")).detect(df, 2000.0)
+    assert len(events) == 1
+    assert events[0].t_event_s == pytest.approx(10.0, abs=0.01)
+
+
 # --------------------------------------------------------------------------- Window / spans
 def _long_signal(fs=200.0, dur=200.0, t_burst=100.0):
     n = int(fs * dur)

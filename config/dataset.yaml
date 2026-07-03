@@ -1,9 +1,10 @@
 # =============================================================================
-# dataset.yaml  —  Recipe A pipeline configuration (Phase-1 STUB)
+# dataset.yaml  —  Recipe A pipeline configuration
 # -----------------------------------------------------------------------------
 # This is the single source of truth for every tunable knob in the pipeline.
-# Phase 1: values here are PROPOSED DEFAULTS for design review. They are not yet
-# consumed by code. Treat anything marked `# TODO(review)` as an open decision.
+# Values here are consumed by the CLI and ETL stages. The current defaults target
+# the locally staged Kaggle/Bosch-style 20-second CNC CSV runs under
+# data_pipeline/data_raw/sensor_dataset.
 #
 # Conventions:
 #   * All paths are relative to the repository root unless absolute.
@@ -19,23 +20,23 @@ random_seed: 1337         # global seed for any stochastic step (split, sampling
 # 1. Paths — where raw inputs live and where processed artifacts are written.
 # -----------------------------------------------------------------------------
 paths:
-  data_raw: data_raw
-  data_processed: data_processed
+  data_raw: data_pipeline/data_raw
+  data_processed: data_pipeline/data_processed
 
   # Per-modality raw input roots (user populates these manually).
-  raw_sensor_root: data_raw            # each dataset is a subfolder below
-  raw_video_root: data_raw/video_raw
-  raw_text_root: data_raw/text_manuals
+  raw_sensor_root: data_pipeline/data_raw/sensor_dataset
+  raw_video_root: data_pipeline/data_raw/video_raw
+  raw_text_root: data_pipeline/data_raw/text_manuals
 
   # Processed outputs.
-  sensor_windows_dir: data_processed/sensor_windows      # per-incident parquet
-  sensor_index: data_processed/sensor_windows.parquet
-  video_dir: data_processed/video                        # normalized clips
-  video_index: data_processed/video_index.parquet
-  text_chunks: data_processed/text_chunks.parquet
-  incidents_index: data_processed/incidents.parquet
+  sensor_windows_dir: data_pipeline/data_processed/sensor_windows
+  sensor_index: data_pipeline/data_processed/sensor_windows.parquet
+  video_dir: data_pipeline/data_processed/video
+  video_index: data_pipeline/data_processed/video_index.parquet
+  text_chunks: data_pipeline/data_processed/text_chunks.parquet
+  incidents_index: data_pipeline/data_processed/incidents.parquet
 
-  logs_dir: logs
+  logs_dir: data_pipeline/logs
 
 # -----------------------------------------------------------------------------
 # 2. Sensor ETL — normalization, sampling-rate estimation, event detection,
@@ -47,16 +48,16 @@ sensor:
   # source column names -> canonical schema names.
   datasets:
     - name: bosch_cnc
-      enabled: true
-      path: data_raw/bosch_cnc
-      reader: bosch_h5            # TODO(review): confirm raw format (.h5 vs .csv)
+      enabled: false              # enable after staging H5 files and validating mapping
+      path: data_pipeline/data_raw/bosch_cnc
+      reader: bosch_h5
       machine_family: cnc_mill
       fs_hz: null                 # null => estimate from timestamps/metadata
       column_map: { ax: X, ay: Y, az: Z }
 
     - name: kaggle_cnc
       enabled: true
-      path: data_raw/kaggle_cnc
+      path: data_pipeline/data_raw/sensor_dataset
       reader: generic_csv
       machine_family: cnc_mill
       fs_hz: 2000                 # Bosch-style CNC accel corpus is sampled at 2 kHz;
@@ -104,7 +105,7 @@ sensor:
 
   # Event detection (sliding-window RMS thresholding is the default heuristic).
   event_detection:
-    method: rms_threshold      # rms_threshold | energy_zscore | manual_labels
+    method: segment_center     # segment_center | rms_threshold | energy_zscore | manual_labels
     channel_for_energy: az     # which channel drives detection; or "magnitude"
     window_s: 1.0              # RMS window length
     hop_s: 0.25               # RMS hop / stride
@@ -123,10 +124,10 @@ sensor:
 
   # Incident windowing around each detected event.
   windowing:
-    pre_event_s: 60.0          # [-60s, +30s] window per the spec
-    post_event_s: 30.0
-    drop_partial_windows: true # drop windows that run off the recording edge
-    max_windows_per_run: null  # null => unlimited; cap to avoid over-sampling
+    pre_event_s: 8.0           # staged CSV runs are ~20 s process segments
+    post_event_s: 8.0
+    drop_partial_windows: false
+    max_windows_per_run: 1     # one representative incident per process segment
 
   # Sensor evidence spans (heuristic v1): the interval(s) that exceeded threshold.
   evidence_spans:
@@ -134,7 +135,7 @@ sensor:
     pad_s: 1.0                     # pad each span by this many seconds
     max_spans: 5
 
-  output_format: parquet       # parquet | hdf5  (TODO(review))
+  output_format: parquet
 
   # Dataset-scale target (informational; checked in evaluation, not enforced here).
   target_total_incident_hours: 72
@@ -157,7 +158,7 @@ video:
   # Controlled vocabularies for tagging (CSV-driven workflow).
   regime_labels: [roughing, finishing, plunge, idle, drilling, contouring]
   condition_labels: [normal, tool_wear_visible, heavy_vibration, coolant_issue, chatter, chip_packing]
-  tagging_csv: data_raw/video_raw/video_tags.csv   # user-edited; merged into index
+  tagging_csv: data_pipeline/data_raw/video_raw/video_tags.csv
 
   target_clip_count: 1000
 
@@ -166,6 +167,8 @@ video:
 # -----------------------------------------------------------------------------
 text:
   input_formats: [md, markdown, txt, docx, pdf]   # pdf added: staged manuals are PDF
+  max_pages_per_doc: 80        # cap large PDFs; 5 staged PDFs still cover ~400 pages
+  dry_run_max_pages_per_doc: 2 # keep dry-run smoke bounded on large manuals
   chunking:
     target_tokens: 175         # ~150-200 token target
     min_tokens: 80
@@ -221,13 +224,13 @@ assemble:
   split:
     strategy: grouped_by_source   # avoid leakage across the same raw run
     fractions: { train: 0.7, val: 0.15, test: 0.10, human_eval: 0.05 }
-    group_key: source_dataset
+    group_key: incident_id        # current staged data has one source_dataset; split by incident
 
 # -----------------------------------------------------------------------------
 # 6. Logging / run control.
 # -----------------------------------------------------------------------------
 runtime:
-  log_level: INFO              # DEBUG | INFO | WARNING | ERROR
+  log_level: WARNING           # DEBUG | INFO | WARNING | ERROR
   log_format: json             # json | text
   fail_fast: false             # if true, abort whole run on first bad file
   num_workers: 1               # parallelism for per-file ETL (Phase-2+)

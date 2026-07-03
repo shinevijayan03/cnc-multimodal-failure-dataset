@@ -24,6 +24,7 @@ from ..common.schemas import Condition, Regime, VideoIndexRow
 
 _INSTALL_HINT = ("ffmpeg/ffprobe not found on PATH. Install from https://ffmpeg.org/ "
                  "(Windows: `winget install Gyan.FFmpeg`) and re-run the video stage.")
+_VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 
 
 # --------------------------------------------------------------------------- #
@@ -166,7 +167,10 @@ class VideoETL:
         root = Path(self.cfg.paths.raw_video_root)
         if not root.exists():
             return []
-        return sorted(p for p in root.rglob("*.mp4") if p.is_file())
+        return sorted(
+            p for p in root.rglob("*")
+            if p.is_file() and p.suffix.lower() in _VIDEO_EXTENSIONS
+        )
 
     def _load_tags(self) -> TagMerger:
         csv_path = self.cfg.resolve(self.cfg.video.tagging_csv)
@@ -182,20 +186,55 @@ class VideoETL:
         ffprobe = ffmpeg.replace("ffmpeg", "ffprobe")
         return shutil.which(ffmpeg) is not None and shutil.which(ffprobe) is not None
 
+    def _repo_relative(self, path: Path) -> str:
+        root = Path(self.cfg.repo_root) if self.cfg.repo_root else Path.cwd()
+        try:
+            return path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return str(path)
+
+    @staticmethod
+    def _probe_without_ffmpeg(path: Path) -> dict:
+        """Best-effort raw video probe when ffmpeg/ffprobe are unavailable."""
+        info = {"fps": 0.0, "duration_s": 0.0, "codec": "unknown", "width": 0, "height": 0}
+        try:
+            import cv2  # noqa: PLC0415
+        except Exception:
+            return info
+        cap = None
+        try:
+            cap = cv2.VideoCapture(str(path))
+            if not cap.isOpened():
+                return info
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+            frames = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+            info["fps"] = round(fps, 6)
+            info["duration_s"] = float(frames / fps) if fps > 0 and frames > 0 else 0.0
+            info["width"] = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            info["height"] = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        except Exception:
+            return info
+        finally:
+            if cap is not None:
+                cap.release()
+        return info
+
     def run(self, limit: int | None = None, dry_run: bool | None = None) -> RunSummary:
         dry_run = self.cfg.runtime.dry_run if dry_run is None else dry_run
         summ = RunSummary(stage="video", dry_run=dry_run)
         files = self._discover()
         summ.discovered = len(files)
 
-        if not self._tools_available():
-            # Isolated, graceful: skip the whole stage with one clear hint so
-            # `all` can proceed (assembly tolerates an empty video index).
-            self.log.warning("video stage skipped: " + _INSTALL_HINT,
-                             extra={"clips_found": len(files)})
-            summ.skipped = len(files)
-            summ.note("reason", "ffmpeg_missing")
-            return summ
+        tools_available = self._tools_available()
+        if not tools_available:
+            # Keep dataset creation usable even before ffmpeg is installed:
+            # write an index pointing at raw clips and mark normalization as
+            # skipped. Installing ffmpeg later and rerunning will create the
+            # normalized video directory/index.
+            self.log.warning("ffmpeg missing; indexing raw video files without normalization. "
+                             + _INSTALL_HINT, extra={"clips_found": len(files)})
+            summ.note("reason", "ffmpeg_missing_raw_index")
+            summ.note("normalization", "skipped")
 
         tags = self._load_tags()
         video_dir = Path(self.cfg.paths.video_dir)
@@ -212,12 +251,15 @@ class VideoETL:
             vid = video_id(source, rel)
             try:
                 if dry_run:
-                    info = self.probe.probe(path)
+                    info = self.probe.probe(path) if tools_available else self._probe_without_ffmpeg(path)
                     out_rel = None
+                elif not tools_available:
+                    info = self._probe_without_ffmpeg(path)
+                    out_rel = self._repo_relative(path)
                 else:
                     dst = video_dir / f"{vid}.mp4"
                     info = self.normalizer.normalize(path, dst)
-                    out_rel = f"{Path(self.cfg.paths.data_processed).name}/{video_dir.name}/{vid}.mp4"
+                    out_rel = self._repo_relative(dst)
             except VideoToolError as exc:
                 summ.bump("errors")
                 self.log.warning("clip failed", extra={"clip": rel, "error": str(exc)})

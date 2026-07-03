@@ -146,6 +146,8 @@ class ChunkingCfg(BaseModel):
 
 class TextCfg(BaseModel):
     input_formats: list[str] = Field(default_factory=lambda: ["md", "markdown", "txt", "docx"])
+    max_pages_per_doc: int | None = Field(default=None, ge=1)
+    dry_run_max_pages_per_doc: int | None = Field(default=2, ge=1)
     chunking: ChunkingCfg = Field(default_factory=ChunkingCfg)
     doc_types: list[str] = Field(default_factory=lambda: ["sop", "maintenance"])
     topic_keywords: dict[str, list[str]] = Field(default_factory=dict)

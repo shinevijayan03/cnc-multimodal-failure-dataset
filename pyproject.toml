@@ -16,6 +16,7 @@ dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "typer>=0.9",
+    "streamlit>=1.54",
 ]
 
 [project.optional-dependencies]
@@ -28,13 +29,23 @@ dev = ["pytest>=7.4", "pytest-cov>=4.1"]
 recipe-a = "src.cli:app"
 
 [tool.setuptools]
-packages = ["src", "src.common", "src.etl"]
+packages = [
+    "contracts",
+    "src",
+    "src.common",
+    "src.etl",
+    "src.eval",
+    "src.features",
+    "src.tgfx",
+    "src.ui",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
     "ffmpeg: tests that require a real ffmpeg/ffprobe binary on PATH",
+    "browser: browser-level UI smoke tests; opt in with RUN_BROWSER_SMOKE=1",
 ]
 
 [tool.ruff]

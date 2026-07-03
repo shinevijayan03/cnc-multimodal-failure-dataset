@@ -1,0 +1,41 @@
+flowchart TD
+    cli["src.cli"] --> config["src.common.config"]
+    cli --> errors["src.common.errors"]
+    cli --> logging["src.common.logging_utils"]
+    cli --> sensor["src.etl.sensor_etl"]
+    cli --> text["src.etl.text_etl"]
+    cli --> video["src.etl.video_etl"]
+    cli --> assemble["src.etl.assemble_incidents"]
+    cli --> evaluate["src.evaluate"]
+
+    sensor --> config
+    sensor --> errors
+    sensor --> ids["src.common.ids"]
+    sensor --> io["src.common.io_utils"]
+    sensor --> logging
+    sensor --> schemas["src.common.schemas"]
+
+    text --> config
+    text --> ids
+    text --> io
+    text --> logging
+    text --> schemas
+
+    video --> config
+    video --> errors
+    video --> ids
+    video --> io
+    video --> logging
+    video --> schemas
+
+    assemble --> config
+    assemble --> errors
+    assemble --> io
+    assemble --> logging
+    assemble --> schemas
+
+    evaluate --> config
+    evaluate --> io
+
+    io --> schemas
+    config --> errors

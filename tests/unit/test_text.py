@@ -5,7 +5,15 @@ from __future__ import annotations
 import pytest
 
 from src.common.config import ChunkingCfg
-from src.etl.text_etl import Chunker, DocReader, TopicTagger, _WhitespaceTokenizer, make_tokenizer
+from src.etl.text_etl import (
+    Chunker,
+    DocReader,
+    TextETL,
+    TopicTagger,
+    _WhitespaceTokenizer,
+    _bounded_pages,
+    make_tokenizer,
+)
 
 WS = _WhitespaceTokenizer
 KW = {"vibration": ["vibration", "chatter"], "tool_wear": ["tool wear", "worn"]}
@@ -77,3 +85,31 @@ def test_docx_read_or_skip(tmp_path):  # UT-TEXT-08
     text, doc_type = DocReader().read(path)
     assert "spindle bearing" in text
     assert doc_type.value == "maintenance"
+
+
+def test_dry_run_page_cap_is_bounded():
+    assert _bounded_pages(max_pages=80, dry_run_max_pages=2, dry_run=True) == 2
+    assert _bounded_pages(max_pages=None, dry_run_max_pages=2, dry_run=True) == 2
+    assert _bounded_pages(max_pages=80, dry_run_max_pages=2, dry_run=False) == 80
+
+
+def test_text_dry_run_uses_bounded_page_cap(mini_cfg, monkeypatch):
+    mini_cfg.text.max_pages_per_doc = 80
+    mini_cfg.text.dry_run_max_pages_per_doc = 1
+    etl = TextETL(mini_cfg)
+    seen_pages = []
+
+    def fake_read(path, max_pages=None):
+        seen_pages.append(max_pages)
+        return "maintenance vibration chatter", doc_type("maintenance")
+
+    def doc_type(value):
+        from src.common.schemas import DocType
+
+        return DocType(value)
+
+    monkeypatch.setattr(etl.reader, "read", fake_read)
+    summary = etl.run(limit=1, dry_run=True)
+
+    assert summary.processed == 1
+    assert seen_pages == [1]

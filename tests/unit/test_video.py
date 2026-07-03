@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,7 +11,8 @@ import pytest
 
 from src.common.config import VideoNormalizeCfg
 from src.common.errors import VideoToolError
-from src.etl.video_etl import FfmpegNormalizer, FfprobeReader, TagMerger, parse_probe
+from src.common.io_utils import read_parquet
+from src.etl.video_etl import FfmpegNormalizer, TagMerger, VideoETL, parse_probe
 
 PROBE_JSON = """
 {"streams": [{"codec_type": "video", "codec_name": "h264",
@@ -91,3 +91,18 @@ def test_tag_merge_absent():  # UT-VID-07
     df = pd.DataFrame([{"video_file": "clip01.mp4", "regime": "roughing"}])
     regime, condition, source = TagMerger(df).merge(["other.mp4"])
     assert regime.value == "unknown" and condition.value == "unknown" and source == "unknown"
+
+
+def test_video_etl_indexes_raw_when_ffmpeg_missing(mini_cfg, monkeypatch):  # UT-VID-08
+    raw = Path(mini_cfg.paths.raw_video_root)
+    raw.mkdir(parents=True, exist_ok=True)
+    (raw / "clip.mov").write_bytes(b"not a real movie, but enough for discovery")
+    monkeypatch.setattr(VideoETL, "_tools_available", lambda self: False)
+
+    summ = VideoETL(mini_cfg).run()
+
+    assert summ.written == 1
+    assert summ.notes["reason"] == "ffmpeg_missing_raw_index"
+    idx = read_parquet(mini_cfg.paths.video_index)
+    assert len(idx) == 1
+    assert idx.iloc[0]["video_file"].endswith("clip.mov")

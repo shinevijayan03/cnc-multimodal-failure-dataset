@@ -1,0 +1,103 @@
+{
+  "artifacts": {
+    "incidents": {
+      "exists": true,
+      "path": "E:/1.Final-Year-Project-2026/4. demo-old/cnc-multimodal-failure-dataset/data_pipeline/data_processed/incidents.parquet",
+      "rows": 1702,
+      "schema": [
+        "incident_id",
+        "source_dataset",
+        "machine_family",
+        "failure_family",
+        "window_start_s",
+        "window_end_s",
+        "fs_hz",
+        "sensor_file",
+        "sensor_channels",
+        "sensor_relevant_spans",
+        "video_file",
+        "video_fps",
+        "video_relevant_spans",
+        "sop_chunk_ids",
+        "maintenance_chunk_ids",
+        "phase_label",
+        "regime_label",
+        "severity_label",
+        "root_cause_label",
+        "alignment_method",
+        "split"
+      ],
+      "sha256": "958f7e7254197080fa28138399426913dbf982f00f319d76abdb5905aa7e43aa"
+    },
+    "sensor_index": {
+      "exists": true,
+      "path": "E:/1.Final-Year-Project-2026/4. demo-old/cnc-multimodal-failure-dataset/data_pipeline/data_processed/sensor_windows.parquet",
+      "rows": 1702,
+      "schema": [
+        "incident_id",
+        "source_dataset",
+        "machine_family",
+        "failure_family",
+        "window_start_s",
+        "window_end_s",
+        "fs_hz",
+        "sensor_file",
+        "sensor_channels",
+        "sensor_relevant_spans",
+        "n_samples"
+      ],
+      "sha256": "9efdba476a2a370214300ae102f6616207e96640d5e605522100db7002cbac97"
+    },
+    "text_chunks": {
+      "exists": true,
+      "path": "E:/1.Final-Year-Project-2026/4. demo-old/cnc-multimodal-failure-dataset/data_pipeline/data_processed/text_chunks.parquet",
+      "rows": 934,
+      "schema": [
+        "doc_id",
+        "chunk_id",
+        "doc_type",
+        "text",
+        "topic_tags",
+        "n_tokens"
+      ],
+      "sha256": "36c40477094d4aff0c953f62f57cfcf9d058e4681e3f7f4105b7be328d0b9fb9"
+    },
+    "video_index": {
+      "exists": true,
+      "path": "E:/1.Final-Year-Project-2026/4. demo-old/cnc-multimodal-failure-dataset/data_pipeline/data_processed/video_index.parquet",
+      "rows": 20,
+      "schema": [
+        "video_id",
+        "video_file",
+        "video_fps",
+        "duration_s",
+        "regime_label",
+        "condition_label",
+        "source"
+      ],
+      "sha256": "fed3f2d74c79cfc68b20868755461c3550ab5212098f9b2175e6eb964135ded2"
+    }
+  },
+  "config": "config/dataset.yaml",
+  "counts": {
+    "failure_family": {
+      "chatter": 571,
+      "spindle_fault": 597,
+      "tool_wear": 534
+    },
+    "incidents": 1702,
+    "splits": {
+      "human_eval": 85,
+      "test": 170,
+      "train": 1192,
+      "val": 255
+    }
+  },
+  "generated_at": "2026-07-02T21:54:49+05:30",
+  "git_sha": "c37bea9779f7c2d8d84a03078de74aebe5c70225",
+  "label_status": "weak_signal_derived_not_ground_truth",
+  "processed_dir": "E:/1.Final-Year-Project-2026/4. demo-old/cnc-multimodal-failure-dataset/data_pipeline/data_processed",
+  "source": "Recipe A processed artifacts",
+  "test_quarantine": "split files list IDs/provenance only; model code must not consume test rows",
+  "version": 1
+}

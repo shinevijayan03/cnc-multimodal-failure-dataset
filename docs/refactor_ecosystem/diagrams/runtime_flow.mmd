@@ -1,0 +1,27 @@
+sequenceDiagram
+    participant User
+    participant CLI as src.cli
+    participant Config as load_config
+    participant Sensor as SensorETL
+    participant Text as TextETL
+    participant Video as VideoETL
+    participant Assemble as IncidentAssembler
+    participant Eval as evaluate_build
+    participant Disk as data_processed
+
+    User->>CLI: python -m src.cli all --config config/dataset.yaml
+    CLI->>Config: parse and validate YAML
+    Config-->>CLI: PipelineConfig with resolved paths
+    CLI->>Sensor: run(limit, dry_run)
+    Sensor->>Disk: write sensor windows and sensor index
+    CLI->>Text: run(limit, dry_run)
+    Text->>Disk: write text chunks index
+    CLI->>Video: run(limit, dry_run)
+    Video->>Disk: write video index or skip if ffmpeg missing
+    CLI->>Assemble: run(limit, dry_run)
+    Assemble->>Disk: read modality indices
+    Assemble->>Disk: write incidents.parquet
+    User->>CLI: python -m src.cli evaluate --tier mvp
+    CLI->>Eval: evaluate_build(config, tier)
+    Eval->>Disk: read incidents and indices
+    Eval->>Disk: write eval_report.json and eval_report.md
