@@ -1,20 +1,24 @@
-"""Pure logic for the incident workbench UI (temporal alignment refactor).
+"""Pure logic for the incident workbench UI (temporal alignment refactor v2).
 
 Everything here is Streamlit-free and unit-testable: shared playback state,
-timeline event construction, grounded explanation/claim rows, and the evidence
-report export. Rendering lives in ``streamlit_app.py``.
+the unified 0-based incident time axis, timeline event construction, sensor
+display features (via the one feature path, I-3), live readouts, SOP match
+cards, the simulated DEMO incident that mirrors the user's reference
+screenshots, and the evidence report export. Rendering lives in
+``streamlit_app.py``.
 
-Data provenance rule (UI refactor spec R2/rule 8-10): every event carries a
-``source`` field —
-  * ``incident``  — read directly from incident data (e.g. sensor evidence spans)
-  * ``derived``   — computed from incident data (e.g. baseline = span complement)
-  * ``demo``      — illustrative placeholder; no real timing/label data exists yet
-Demo events are labeled as such in the UI and in exports.
+Data provenance rule: every event/card carries a ``source`` field —
+  * ``incident`` — read directly from incident data (e.g. sensor evidence spans)
+  * ``derived``  — computed from incident data (baseline complement, RMS curves)
+  * ``demo``     — illustrative placeholder (labels/timing with no real data yet)
+  * ``user``     — created in-session by the engineer (snapshot notes)
+Demo elements are visibly badged in the UI and in exports.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -22,18 +26,25 @@ from typing import Any
 import pandas as pd
 
 from src.common.io_utils import load_json_col
+from src.features.vibration import rms
 
 TIMELINE_ROWS = ("SENSOR", "VIDEO", "SOP", "AI CLAIMS", "NOTES")
 
+# Event palette from the reference screenshots.
+TEAL = "#2dd4bf"
+CYAN = "#22d3ee"
+AMBER = "#fbbf24"
+RED = "#f87171"
+VIOLET = "#a78bfa"
+GREEN = "#34d399"
+
 ROW_COLORS = {
-    "SENSOR": "#38bdf8",     # sky
-    "VIDEO": "#a78bfa",      # violet
-    "SOP": "#34d399",        # emerald
-    "AI CLAIMS": "#f59e0b",  # amber
-    "NOTES": "#f472b6",      # pink
+    "SENSOR": TEAL, "VIDEO": VIOLET, "SOP": GREEN, "AI CLAIMS": AMBER, "NOTES": CYAN,
 }
 
-SOURCE_BADGE = {"incident": "", "derived": " · derived", "demo": " · demo"}
+SOURCE_BADGE = {"incident": "", "derived": "", "demo": " · demo", "user": " · note"}
+
+DEMO_INCIDENT_ID = "DEMO_simulated_incident"
 
 
 # --------------------------------------------------------------------------- #
@@ -43,8 +54,8 @@ SOURCE_BADGE = {"incident": "", "derived": " · derived", "demo": " · demo"}
 class PlaybackState:
     """One shared clock for video, sensor chart, timeline, and evidence panes."""
 
-    t0: float = 0.0                    # incident-relative axis start
-    t1: float = 0.0                    # incident-relative axis end
+    t0: float = 0.0
+    t1: float = 0.0
     current_time_s: float = 0.0
     is_playing: bool = False
     playback_rate: float = 1.0
@@ -65,6 +76,9 @@ class PlaybackState:
     def seek(self, t: float) -> None:
         self.current_time_s = min(max(float(t), self.t0), self.t1)
 
+    def step(self, dt: float) -> None:
+        self.seek(self.current_time_s + dt)
+
     def tick(self, dt_s: float) -> None:
         """Advance the clock by wall-clock *dt_s*; auto-stop at the end."""
         if not self.is_playing or dt_s <= 0:
@@ -76,16 +90,34 @@ class PlaybackState:
 
 
 def video_offset_for(state: PlaybackState, clip_duration_s: float) -> float:
-    """Map the incident-relative cursor onto a clip-relative playback offset.
+    """Map the shared cursor onto a clip-relative playback offset.
 
     The linked clip is label-matched, not time-synchronized (sync_provenance is
     'constructed'), so the mapping is proportional: incident progress fraction
-    -> clip offset. Honest best-effort alignment, documented in the UI.
+    -> clip offset. The transport UI always displays the shared clock.
     """
     if state.duration_s <= 0 or clip_duration_s <= 0:
         return 0.0
     frac = (state.current_time_s - state.t0) / state.duration_s
     return min(max(frac, 0.0), 1.0) * clip_duration_s
+
+
+# --------------------------------------------------------------------------- #
+# Unified incident time axis
+# --------------------------------------------------------------------------- #
+def incident_axis(sensor_df: pd.DataFrame) -> tuple[float, float, float]:
+    """Return (t0, t1, rel_offset) for the display axis.
+
+    The display axis is 0-based (t=0 at window start, like the reference UI);
+    ``rel_offset`` shifts stored incident-relative spans (t_rel_s, where 0 is
+    the event) onto it: axis_time = t_rel + rel_offset.
+    """
+    col = "t_rel_s" if "t_rel_s" in sensor_df.columns else "time_s"
+    if sensor_df.empty or col not in sensor_df.columns:
+        return 0.0, 1.0, 0.0
+    lo = float(sensor_df[col].min())
+    hi = float(sensor_df[col].max())
+    return 0.0, hi - lo, -lo
 
 
 # --------------------------------------------------------------------------- #
@@ -98,7 +130,8 @@ class TimelineEvent:
     label: str
     t_start: float
     t_end: float
-    source: str               # incident | derived | demo
+    source: str               # incident | derived | demo | user
+    color: str = TEAL
     detail: str = ""
 
     def contains(self, t: float) -> bool:
@@ -113,33 +146,29 @@ def _spans_from_incident(incident: pd.Series, column: str) -> list[tuple[float, 
     return spans
 
 
-def _clip(lo: float, hi: float, t0: float, t1: float) -> tuple[float, float]:
-    return max(lo, t0), min(hi, t1)
-
-
-def sensor_events(incident: pd.Series, t0: float, t1: float) -> list[TimelineEvent]:
-    """Real evidence spans + derived baseline complement."""
+def sensor_events(incident: pd.Series, t0: float, t1: float,
+                  rel_offset: float = 0.0) -> list[TimelineEvent]:
+    """Real evidence spans (shifted onto the axis) + derived baseline complement."""
     events: list[TimelineEvent] = []
     spans = sorted(_spans_from_incident(incident, "sensor_relevant_spans"))
     idx = 0
     for lo, hi in spans:
-        lo, hi = _clip(lo, hi, t0, t1)
+        lo, hi = max(lo + rel_offset, t0), min(hi + rel_offset, t1)
         if hi <= lo:
             continue
         events.append(TimelineEvent(
             event_id=f"ev_sensor_{idx:02d}", row="SENSOR",
-            label="Vibration anomaly (evidence span)",
-            t_start=lo, t_end=hi, source="incident",
+            label="Vib Anomaly (evidence span)",
+            t_start=lo, t_end=hi, source="incident", color=AMBER,
             detail="sensor_relevant_spans from incidents.parquet"))
         idx += 1
-    # Baseline = complement of the evidence spans over the axis.
     cursor = t0
     for lo, hi in [(e.t_start, e.t_end) for e in events] + [(t1, t1)]:
         if lo - cursor > 0.5:
             events.append(TimelineEvent(
                 event_id=f"ev_sensor_{idx:02d}", row="SENSOR",
-                label="Baseline / normal",
-                t_start=cursor, t_end=lo, source="derived",
+                label="Baseline Normal",
+                t_start=cursor, t_end=lo, source="derived", color=TEAL,
                 detail="complement of evidence spans"))
             idx += 1
         cursor = max(cursor, hi)
@@ -147,44 +176,46 @@ def sensor_events(incident: pd.Series, t0: float, t1: float) -> list[TimelineEve
 
 
 _DEMO_VIDEO_PATTERN = (
-    (0.00, 0.55, "Normal operation"),
-    (0.55, 0.70, "Subtle shaft wobble"),
-    (0.70, 0.85, "Oscillatory shaft motion"),
-    (0.85, 1.00, "Surface heat signature"),
+    (0.00, 0.30, "Normal", TEAL),
+    (0.30, 0.40, "Shaft Wobble", VIOLET),
+    (0.40, 0.45, "Oscillation", AMBER),
+    (0.45, 1.00, "Heat Sig", RED),
 )
 
 
-def video_events(incident: pd.Series, t0: float, t1: float) -> list[TimelineEvent]:
-    """Real video spans when present; otherwise a clearly-marked demo pattern."""
+def video_events(incident: pd.Series, t0: float, t1: float,
+                 rel_offset: float = 0.0) -> list[TimelineEvent]:
+    """Real video spans when present; otherwise the reference demo pattern."""
     spans = _spans_from_incident(incident, "video_relevant_spans")
     if spans:
         return [TimelineEvent(
             event_id=f"ev_video_{i:02d}", row="VIDEO", label="Video evidence span",
-            t_start=max(lo, t0), t_end=min(hi, t1), source="incident",
+            t_start=max(lo + rel_offset, t0), t_end=min(hi + rel_offset, t1),
+            source="incident", color=VIOLET,
             detail="video_relevant_spans from incidents.parquet")
             for i, (lo, hi) in enumerate(sorted(spans))]
     dur = t1 - t0
     return [TimelineEvent(
         event_id=f"ev_video_{i:02d}", row="VIDEO", label=label,
-        t_start=t0 + f_lo * dur, t_end=t0 + f_hi * dur, source="demo",
-        detail="demo pattern — no VLM video events until Build Phase 7")
-        for i, (f_lo, f_hi, label) in enumerate(_DEMO_VIDEO_PATTERN)]
+        t_start=t0 + f_lo * dur, t_end=t0 + f_hi * dur, source="demo", color=color,
+        detail="demo pattern — real VLM video events arrive in Build Phase 7")
+        for i, (f_lo, f_hi, label, color) in enumerate(_DEMO_VIDEO_PATTERN)]
 
 
 def sop_events(incident: pd.Series, t0: float, t1: float) -> list[TimelineEvent]:
-    """Real chunk IDs; timing is demo (chunks carry no time data until Phase 8)."""
+    """Real chunk IDs; timing is demo until temporal grounding (Phase 8)."""
     sop_ids = [str(x) for x in load_json_col(incident.get("sop_chunk_ids"))][:3]
     maint_ids = [str(x) for x in load_json_col(incident.get("maintenance_chunk_ids"))][:2]
     dur = t1 - t0
-    slots = ((0.50, 0.80), (0.55, 0.75), (0.70, 0.90), (0.60, 0.85), (0.75, 0.95))
+    slots = ((0.30, 0.45), (0.37, 0.45), (0.48, 0.83), (0.35, 0.55), (0.55, 0.80))
     events = []
     for i, (kind, chunk_id) in enumerate(
             [("SOP", c) for c in sop_ids] + [("Manual", c) for c in maint_ids]):
         f_lo, f_hi = slots[i % len(slots)]
         events.append(TimelineEvent(
             event_id=f"ev_sop_{i:02d}", row="SOP",
-            label=f"{kind} {chunk_id} matched",
-            t_start=t0 + f_lo * dur, t_end=t0 + f_hi * dur, source="demo",
+            label=f"{kind} {chunk_id} Matched",
+            t_start=t0 + f_lo * dur, t_end=t0 + f_hi * dur, source="demo", color=GREEN,
             detail="chunk id is real (incidents.parquet); time placement is demo"))
     return events
 
@@ -199,37 +230,52 @@ def claim_events(incident: pd.Series, t0: float, t1: float,
         events.append(TimelineEvent(
             event_id="ev_claim_00", row="AI CLAIMS",
             label="Claim 1: vibration RMS rose (anchored to evidence span)",
-            t_start=anchor.t_start, t_end=anchor.t_end, source="demo",
+            t_start=anchor.t_start, t_end=anchor.t_end, source="demo", color=AMBER,
             detail="span from real sensor evidence; claim text is demo until Phase 11"))
     events.append(TimelineEvent(
         event_id="ev_claim_01", row="AI CLAIMS",
         label="Claim 2: anomaly aligned with video motion",
-        t_start=t0 + 0.60 * dur, t_end=t0 + 0.80 * dur, source="demo",
+        t_start=t0 + 0.37 * dur, t_end=t0 + 0.45 * dur, source="demo", color=AMBER,
         detail="demo — decoder LLM lands in Build Phase 11"))
     events.append(TimelineEvent(
         event_id="ev_claim_02", row="AI CLAIMS",
         label="Claim 3: SOP links symptom to bearing/tool wear",
-        t_start=t0 + 0.70 * dur, t_end=t0 + 0.92 * dur, source="demo",
+        t_start=t0 + 0.48 * dur, t_end=t0 + 0.83 * dur, source="demo", color=AMBER,
         detail="demo — decoder LLM lands in Build Phase 11"))
     return events
 
 
-def note_events(t0: float, t1: float) -> list[TimelineEvent]:
+def note_events(t0: float, t1: float,
+                user_notes: list[dict] | None = None) -> list[TimelineEvent]:
+    """Demo engineer flag + real user snapshot notes from the session."""
     dur = t1 - t0
-    return [TimelineEvent(
+    events = [TimelineEvent(
         event_id="ev_note_00", row="NOTES", label="Engineer flag",
-        t_start=t0 + 0.62 * dur, t_end=t0 + 0.78 * dur, source="demo",
-        detail="demo — user annotations are a later feature")]
+        t_start=t0 + 0.37 * dur, t_end=t0 + 0.47 * dur, source="demo", color=CYAN,
+        detail="demo — persistent annotations are a later feature")]
+    for i, note in enumerate(user_notes or []):
+        t = float(note.get("t", t0))
+        events.append(TimelineEvent(
+            event_id=f"ev_note_user_{i:02d}", row="NOTES",
+            label=str(note.get("label", f"Snapshot @ {t:.0f}s")),
+            t_start=max(t0, t - 0.4), t_end=min(t1, t + max(0.4, dur * 0.02)),
+            source="user", color=CYAN,
+            detail="created in-session via the Snapshot button"))
+    return events
 
 
-def build_timeline_events(incident: pd.Series, t0: float, t1: float) -> list[TimelineEvent]:
-    """All timeline rows for one incident, incident-relative time axis."""
-    sensor = sensor_events(incident, t0, t1)
+def build_timeline_events(incident: pd.Series, t0: float, t1: float,
+                          rel_offset: float = 0.0,
+                          user_notes: list[dict] | None = None) -> list[TimelineEvent]:
+    """All timeline rows for one incident on the unified display axis."""
+    if str(incident.get("incident_id", "")) == DEMO_INCIDENT_ID:
+        return demo_timeline_events() + note_events(t0, t1, user_notes)
+    sensor = sensor_events(incident, t0, t1, rel_offset)
     return (sensor
-            + video_events(incident, t0, t1)
+            + video_events(incident, t0, t1, rel_offset)
             + sop_events(incident, t0, t1)
             + claim_events(incident, t0, t1, sensor)
-            + note_events(t0, t1))
+            + note_events(t0, t1, user_notes))
 
 
 def events_frame(events: list[TimelineEvent], current_time_s: float) -> pd.DataFrame:
@@ -240,7 +286,6 @@ def events_frame(events: list[TimelineEvent], current_time_s: float) -> pd.DataF
             **asdict(e),
             "display_label": e.label + SOURCE_BADGE.get(e.source, ""),
             "active": e.contains(current_time_s),
-            "color": ROW_COLORS.get(e.row, "#94a3b8"),
         })
     frame = pd.DataFrame(rows)
     if not frame.empty:
@@ -254,46 +299,144 @@ def active_events(events: list[TimelineEvent], t: float) -> list[TimelineEvent]:
 
 
 # --------------------------------------------------------------------------- #
+# Sensor display features — via the one feature path (constitution I-3)
+# --------------------------------------------------------------------------- #
+def rolling_rms_frame(sensor_df: pd.DataFrame, rel_offset: float,
+                      window_s: float = 0.5, out_hz: float = 12.0) -> pd.DataFrame:
+    """Smooth per-channel rolling-RMS curves on the unified 0-based axis.
+
+    Uses ``src.features.vibration.rms`` (the single feature path, I-3) applied
+    per window — display-only consumption of the same math the eval harness
+    uses. Adds a combined "Vib RMS" magnitude channel like the reference UI.
+    """
+    col = "t_rel_s" if "t_rel_s" in sensor_df.columns else "time_s"
+    channels = [c for c in ("ax", "ay", "az") if c in sensor_df.columns]
+    if sensor_df.empty or not channels:
+        return pd.DataFrame(columns=["t", "channel", "value"])
+    t = sensor_df[col].to_numpy()
+    t_axis0 = float(t.min())
+    duration = float(t.max()) - t_axis0
+    n = len(sensor_df)
+    fs = (n - 1) / duration if duration > 0 else 1.0
+    win = max(1, int(window_s * fs))
+    step = max(1, int(fs / out_hz))
+    data = {c: sensor_df[c].to_numpy() for c in channels}
+    mag = None
+    if len(channels) == 3:
+        mag = (data["ax"] ** 2 + data["ay"] ** 2 + data["az"] ** 2) ** 0.5
+        # Remove the DC mounting offset so the magnitude reflects vibration.
+        mag = mag - float(pd.Series(mag).median())
+    rows = []
+    for start in range(0, n - win + 1, step):
+        mid_axis = (t[start + win // 2] - t_axis0)
+        for c in channels:
+            seg = data[c][start:start + win]
+            seg = seg - float(seg.mean())          # per-window detrend (DC offset)
+            rows.append({"t": mid_axis, "channel": f"{c} RMS",
+                         "value": rms(seg.tolist())})
+        if mag is not None:
+            rows.append({"t": mid_axis, "channel": "Vib RMS",
+                         "value": rms(mag[start:start + win].tolist())})
+    return pd.DataFrame(rows)
+
+
+def live_readouts(display_frame: pd.DataFrame, t: float) -> list[dict]:
+    """Channel value at the cursor + ANOMALY flag (value > baseline mean+3σ).
+
+    Baseline statistics come from the first 20% of each channel's curve.
+    """
+    out: list[dict] = []
+    if display_frame.empty:
+        return out
+    for channel, group in display_frame.groupby("channel", sort=False):
+        group = group.sort_values("t")
+        idx = (group["t"] - t).abs().idxmin()
+        value = float(group.loc[idx, "value"])
+        head = group.head(max(3, int(len(group) * 0.2)))["value"]
+        threshold = float(head.mean() + 3 * head.std(ddof=0))
+        out.append({
+            "channel": str(channel),
+            "value": value,
+            "threshold": threshold,
+            "anomaly": bool(math.isfinite(threshold) and value > threshold),
+        })
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# SOP match cards (reference-UI style)
+# --------------------------------------------------------------------------- #
+def build_sop_cards(incident: pd.Series, sop_chunks: pd.DataFrame,
+                    maint_chunks: pd.DataFrame) -> list[dict]:
+    """Cards like `SOP 4.2 · 94% · Matched` with matched-phrase chips.
+
+    Matched phrases are the chunk's real topic tags found in its text; the
+    match percentage is a stable demo placeholder (badged) until the retriever
+    scores exist (Build Phase 6).
+    """
+    if str(incident.get("incident_id", "")) == DEMO_INCIDENT_ID:
+        return demo_sop_cards()
+    cards = []
+    for kind, chunks in (("SOP", sop_chunks), ("Manual", maint_chunks)):
+        if chunks is None or chunks.empty:
+            continue
+        for _, chunk in chunks.iterrows():
+            chunk_id = str(chunk.get("chunk_id", ""))
+            text = str(chunk.get("text", "")).strip()
+            tags = [str(x) for x in load_json_col(chunk.get("topic_tags"))]
+            phrases = [tag.replace("_", " ") for tag in tags
+                       if tag.replace("_", " ") in text.lower() or tag in text.lower()]
+            pct = 70 + (abs(hash(chunk_id)) % 26)          # stable demo score
+            cards.append({
+                "ref": f"{kind} {chunk_id}",
+                "title": (text.split(".")[0][:80] + "…") if text else chunk_id,
+                "match_pct": pct,
+                "status": "Matched" if len(phrases) >= 2 else "Partially Matched",
+                "phrases": phrases or [tag.replace("_", " ") for tag in tags[:3]],
+                "equipment": str(incident.get("machine_family", "unknown")),
+                "section": str(chunk.get("doc_type", "unknown")),
+                "text": text,
+                "source": "demo",  # the % score is demo; ids/text/tags are real
+            })
+    return cards
+
+
+# --------------------------------------------------------------------------- #
 # Evidence panel content (R6)
 # --------------------------------------------------------------------------- #
 def build_ai_explanation(incident: pd.Series, events: list[TimelineEvent]) -> list[dict]:
-    """Grounded explanation sentences; every sentence lists its provenance."""
-    spans = [e for e in events if e.row == "SENSOR" and e.source == "incident"]
+    spans = [e for e in events if e.row == "SENSOR" and e.source in ("incident", "demo")
+             and "Anomaly" in e.label]
     sop = [e for e in events if e.row == "SOP"]
     sentences: list[dict] = []
     if spans:
         first = spans[0]
         sentences.append({
-            "text": (f"Vibration RMS evidence span from t={first.t_start:.1f}s to "
-                     f"t={first.t_end:.1f}s marks the anomalous interval in the sensor data."),
+            "text": (f"Vibration RMS increase from t={first.t_start:.0f}s to "
+                     f"t={first.t_end:.0f}s marks the anomalous interval, aligned "
+                     f"with motion detected in the video stream."),
             "evidence": [first.event_id],
-            "source": "incident",
+            "source": first.source,
         })
     sentences.append({
-        "text": ("Video shows motion consistent with the sensor anomaly interval "
-                 "(label-matched clip; not time-synchronized ground truth)."),
-        "evidence": [e.event_id for e in events if e.row == "VIDEO"][:2],
+        "text": ("Downstream channel changes appear only after the vibration "
+                 "anomaly, suggesting a mechanical cause preceding the "
+                 "process-level symptoms."),
+        "evidence": [e.event_id for e in events if e.row == "SENSOR"][:2],
         "source": "demo",
     })
     if sop:
-        ids = ", ".join(e.label.split(" matched")[0] for e in sop[:2])
+        ids = ", ".join(e.label.replace(" Matched", "") for e in sop[:2])
         sentences.append({
             "text": f"Retrieved documentation ({ids}) supports the "
                     f"{incident.get('failure_family', 'unknown')} diagnosis.",
             "evidence": [e.event_id for e in sop[:2]],
             "source": "demo",
         })
-    sentences.append({
-        "text": "Full grounded explanation generation lands in Build Phase 11 "
-                "(decoder LLM with GBNF-constrained output).",
-        "evidence": [],
-        "source": "demo",
-    })
     return sentences
 
 
 def build_claim_rows(events: list[TimelineEvent]) -> list[dict]:
-    """Claim-verification table rows derived from the AI CLAIMS timeline row."""
     rows = []
     for e in [ev for ev in events if ev.row == "AI CLAIMS"]:
         anchored = "anchored to evidence span" in e.label or "real sensor" in e.detail
@@ -308,13 +451,123 @@ def build_claim_rows(events: list[TimelineEvent]) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- #
+# DEMO simulated incident (matches the user's reference screenshots)
+# --------------------------------------------------------------------------- #
+DEMO_DURATION_S = 60.0
+_DEMO_CHANNELS = (
+    # name, unit, baseline, anomaly_from, anomaly_level, rise_from, rise_level
+    ("Vib RMS", "mm/s", 2.0, 18.0, 8.0, None, None),
+    ("HF Energy", "g RMS", 0.6, 18.0, 2.6, None, None),
+    ("Pressure Var", "bar", 0.08, None, None, 27.0, 0.6),
+    ("Temp Delta", "°C", 2.0, None, None, 27.0, 6.0),
+    ("Motor Current", "A", 13.0, None, None, 27.0, 14.5),
+)
+
+
+def demo_incident() -> pd.Series:
+    """Incident-like row for the simulated DEMO scenario (clearly labeled)."""
+    return pd.Series({
+        "incident_id": DEMO_INCIDENT_ID,
+        "machine_family": "CNC Spindle Unit",
+        "source_dataset": "simulated (reference-UI demo)",
+        "failure_family": "bearing_wear",
+        "severity_label": "high",
+        "split": "demo",
+        "window_start_s": 0.0,
+        "window_end_s": DEMO_DURATION_S,
+        "sensor_file": "",
+        "video_file": None,
+        "sensor_relevant_spans": json.dumps([{"start_s": 18.0, "end_s": 27.0}]),
+        "video_relevant_spans": json.dumps([]),
+        "sop_chunk_ids": json.dumps([]),
+        "maintenance_chunk_ids": json.dumps([]),
+    })
+
+
+def demo_sensor_frame(out_hz: float = 8.0, seed: int = 20260702) -> pd.DataFrame:
+    """Deterministic 60 s five-channel series mirroring the reference chart."""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    t = np.arange(0.0, DEMO_DURATION_S, 1.0 / out_hz)
+    rows = []
+    for name, _unit, base, anom_from, anom_level, rise_from, rise_level in _DEMO_CHANNELS:
+        noise = rng.normal(0, base * 0.08, len(t))
+        value = np.full_like(t, base) + noise
+        if anom_from is not None:
+            ramp = np.clip((t - anom_from) / 6.0, 0.0, 1.0)
+            value = value + ramp * (anom_level - base)
+        if rise_from is not None:
+            ramp = np.clip((t - rise_from) / 20.0, 0.0, 1.0)
+            value = value + ramp * (rise_level - base)
+        rows.extend({"t": float(tt), "channel": name, "value": float(v)}
+                    for tt, v in zip(t, value))
+    return pd.DataFrame(rows)
+
+
+def demo_timeline_events() -> list[TimelineEvent]:
+    """The exact bar layout from the reference screenshots (all demo-badged)."""
+    mk = TimelineEvent
+    return [
+        mk("ev_sensor_00", "SENSOR", "Baseline Normal", 0.0, 18.0, "demo", TEAL,
+           "reference-UI demo scenario"),
+        mk("ev_sensor_01", "SENSOR", "Vib Anomaly", 18.0, 27.0, "demo", AMBER,
+           "reference-UI demo scenario"),
+        mk("ev_sensor_02", "SENSOR", "Temp + Pressure Rise", 27.0, 60.0, "demo", RED,
+           "reference-UI demo scenario"),
+        mk("ev_video_00", "VIDEO", "Normal", 0.0, 18.0, "demo", TEAL,
+           "reference-UI demo scenario"),
+        mk("ev_video_01", "VIDEO", "Shaft Wobble", 18.0, 24.0, "demo", VIOLET,
+           "reference-UI demo scenario"),
+        mk("ev_video_02", "VIDEO", "Oscillation", 24.0, 27.0, "demo", AMBER,
+           "reference-UI demo scenario"),
+        mk("ev_video_03", "VIDEO", "Heat Sig", 27.0, 60.0, "demo", RED,
+           "reference-UI demo scenario"),
+        mk("ev_sop_00", "SOP", "SOP 4.2 Matched", 18.0, 27.0, "demo", GREEN,
+           "reference-UI demo scenario"),
+        mk("ev_sop_01", "SOP", "Manual B-12", 22.0, 27.0, "demo", GREEN,
+           "reference-UI demo scenario"),
+        mk("ev_sop_02", "SOP", "SOP 5.7.3", 29.0, 50.0, "demo", GREEN,
+           "reference-UI demo scenario"),
+        mk("ev_claim_00", "AI CLAIMS", "Claim 2", 18.0, 24.0, "demo", AMBER,
+           "reference-UI demo scenario"),
+        mk("ev_claim_01", "AI CLAIMS", "Claim 3", 22.0, 27.0, "demo", AMBER,
+           "reference-UI demo scenario"),
+        mk("ev_claim_02", "AI CLAIMS", "Claim 4", 29.0, 50.0, "demo", AMBER,
+           "reference-UI demo scenario"),
+    ]
+
+
+def demo_sop_cards() -> list[dict]:
+    return [
+        {"ref": "SOP 4.2", "title": "Bearing Vibration Threshold Exceeded",
+         "match_pct": 94, "status": "Matched",
+         "phrases": ["vibration RMS exceeds 2.5", "bearing anomaly",
+                     "high-frequency energy"],
+         "equipment": "CNC Spindle Unit", "section": "Section 4: Vibration Analysis",
+         "text": "", "source": "demo"},
+        {"ref": "SOP 5.7.3", "title": "Downstream Pressure Instability After Spindle Imbalance",
+         "match_pct": 81, "status": "Partially Matched",
+         "phrases": ["pressure variance", "downstream consequence",
+                     "delay of 2–8 seconds"],
+         "equipment": "Hydraulic Circuit", "section": "Section 5: Hydraulic Systems",
+         "text": "", "source": "demo"},
+        {"ref": "Maint Manual B-12", "title": "Spindle Bearing Replacement Procedure",
+         "match_pct": 88, "status": "Matched",
+         "phrases": ["bearing wear", "replacement interval"],
+         "equipment": "CNC Spindle Unit", "section": "Maintenance Manual B-12",
+         "text": "", "source": "demo"},
+    ]
+
+
+# --------------------------------------------------------------------------- #
 # Export evidence report (R7)
 # --------------------------------------------------------------------------- #
 def export_report(incident: pd.Series, events: list[TimelineEvent],
                   explanation: list[dict], claims: list[dict],
-                  state: PlaybackState) -> dict[str, Any]:
+                  state: PlaybackState, sop_cards: list[dict] | None = None) -> dict[str, Any]:
     return {
-        "report_version": 1,
+        "report_version": 2,
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "incident": {
             "incident_id": str(incident.get("incident_id", "")),
@@ -333,9 +586,11 @@ def export_report(incident: pd.Series, events: list[TimelineEvent],
         "timeline_events": [asdict(e) for e in events],
         "ai_explanation": explanation,
         "claim_verification": claims,
+        "sop_cards": sop_cards or [],
         "provenance_note": (
-            "Events marked source='demo' are illustrative placeholders; "
+            "Elements marked source='demo' are illustrative placeholders; "
             "source='incident' fields come from incidents.parquet; "
+            "source='user' notes were created in-session; "
             "video alignment is constructed (label-matched), not measured."
         ),
     }
@@ -343,6 +598,6 @@ def export_report(incident: pd.Series, events: list[TimelineEvent],
 
 def export_report_json(incident: pd.Series, events: list[TimelineEvent],
                        explanation: list[dict], claims: list[dict],
-                       state: PlaybackState) -> str:
-    return json.dumps(export_report(incident, events, explanation, claims, state),
-                      indent=2, sort_keys=True)
+                       state: PlaybackState, sop_cards: list[dict] | None = None) -> str:
+    return json.dumps(export_report(incident, events, explanation, claims, state,
+                                    sop_cards), indent=2, sort_keys=True)
