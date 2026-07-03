@@ -201,6 +201,26 @@ class AssembleCfg(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Encoder (Build Phase 4)
+# --------------------------------------------------------------------------- #
+class EncoderCfg(BaseModel):
+    kind: str = "autoencoder"            # autoencoder | baseline
+    dim: int = Field(default=64, gt=0)   # Hvib embedding dimension
+    hidden: int = Field(default=256, gt=0)
+    epochs: int = Field(default=20, gt=0)
+    batch_size: int = Field(default=64, gt=0)
+    lr: float = Field(default=1e-3, gt=0)
+    device: str = "cuda"                 # D11: local GPU always; cpu only in tests
+
+    @field_validator("kind")
+    @classmethod
+    def _kind_ok(cls, v: str) -> str:
+        if v not in {"autoencoder", "baseline"}:
+            raise ValueError(f"encoder.kind '{v}' not in autoencoder|baseline")
+        return v
+
+
+# --------------------------------------------------------------------------- #
 # Runtime
 # --------------------------------------------------------------------------- #
 class RuntimeCfg(BaseModel):
@@ -222,6 +242,7 @@ class PipelineConfig(BaseModel):
     video: VideoCfg = Field(default_factory=VideoCfg)
     text: TextCfg = Field(default_factory=TextCfg)
     assemble: AssembleCfg = Field(default_factory=AssembleCfg)
+    encoder: EncoderCfg = Field(default_factory=EncoderCfg)
     runtime: RuntimeCfg = Field(default_factory=RuntimeCfg)
 
     # Populated by load_config(); the absolute repo root all relative paths resolve against.

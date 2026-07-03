@@ -14,6 +14,9 @@ data_pipeline/logs/**
 !data_pipeline/logs/**/.gitkeep
 logs/
 
+# --- Model checkpoints (recreatable from seeded training) ---
+models/
+
 # --- Python ---
 __pycache__/
 *.py[cod]

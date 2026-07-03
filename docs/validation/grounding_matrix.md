@@ -71,3 +71,14 @@ load-bearing claims:
 | Real corpus features: 3399 windows, 0 skipped, unique IDs + sha256s, contract sample validated | command | `python -m src.tgfx.sensor_features --config config/dataset.yaml` + pandas describe | High | No | Verified |
 | Anomaly scores are near zero on the continuous-machining corpus (mean 0.0052) | command output | same summary; expected — sub-windows of a sustained cut resemble each other | High | No | Verified |
 | No val KPI regression | command | `evaluate --tier mvp` → GRADE: PASS; `src/eval/` untouched | High | No | Verified |
+
+### Phase 4 (2026-07-03)
+
+| Claim | Evidence Source | File/Command/Test/Log | Confidence | Inference? | Status |
+|---|---|---|---|---|---|
+| Real good/bad labels recovered for 100% of incidents (70 bad / 1632 good) | command | `scripts/derive_quality_labels.py` summary; full coverage proves deterministic id re-derivation | High | No | Verified |
+| GPU training deterministic (same seed → bit-identical metrics) | commands | two runs seed 20260702: identical final_epoch_loss / val_recon / AUROC | High | No | Verified |
+| Encoder beats heuristic and baseline on val (0.5798 > 0.5198 > 0.4170) | run record + command | `docs/_eval/runs.jsonl` encoder_autoencoder_20260702_…; `--kind baseline --no-write` output | High | No | Verified (diagnostic, run-level labels — caveat in record) |
+| Test split mechanically refused by the token loader | test | `test_load_tokens_refuses_test_split` (PermissionError) | High | No | Verified |
+| cuBLAS determinism issue found + fixed on the RTX 3060 | log + code | first cuda run RuntimeError; `torch_ae.py` sets CUBLAS_WORKSPACE_CONFIG | High | No | Verified |
+| Suite green after phase | command | `pytest -q` → 174 passed, 1 skipped | High | No | Verified |

@@ -229,7 +229,20 @@ assemble:
     group_key: incident_id        # current staged data has one source_dataset; split by incident
 
 # -----------------------------------------------------------------------------
-# 6. Logging / run control.
+# 6. Sensor encoder (Build Phase 4). Trains on the train split only; the test
+#    split is quarantined (constitution I-4). Device policy: D11 (local GPU).
+# -----------------------------------------------------------------------------
+encoder:
+  kind: autoencoder            # autoencoder | baseline
+  dim: 64                      # Hvib embedding dimension
+  hidden: 256
+  epochs: 20
+  batch_size: 64
+  lr: 0.001
+  device: cuda
+
+# -----------------------------------------------------------------------------
+# 7. Logging / run control.
 # -----------------------------------------------------------------------------
 runtime:
   log_level: WARNING           # DEBUG | INFO | WARNING | ERROR

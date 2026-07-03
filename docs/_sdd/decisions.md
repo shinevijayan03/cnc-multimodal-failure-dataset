@@ -159,3 +159,22 @@ Status:
   `src/features/patching.py`, `src/features/vibration.py`
   (spectral_bands, sliding_rms moved from the ETL), and
   `src/tgfx/sensor_features.py`.
+
+## D13 - Encoder Input Tokens and Diagnostic Labels (Build Phase 4)
+
+Decision:
+- The v1 sensor encoder consumes patch-feature tokens: per 12 s sub-window a
+  (95 patches x 15 features) matrix - per patch and channel, RMS + 4 spectral
+  bands from the one feature path (I-3). Raw-patch PatchTST input remains a
+  config-selectable future `encoder.kind`.
+- The training diagnostic target is the recovered run-level good/bad folder
+  label (scripts/derive_quality_labels.py; real labels, every window inherits
+  its run's label). This is a diagnostic, NOT KPI gate G3, which stays
+  fixture-only until Phase 12 (I-6 untouched).
+- GPU determinism (D11 + I-5) requires CUBLAS_WORKSPACE_CONFIG=:4096:8; the
+  encoder module sets it before the first cuBLAS call.
+
+Status:
+- Adopted 2026-07-03 in Build Phase 4; implemented in `src/encoder/`;
+  first run record: encoder_autoencoder_20260702_20260703T175903+0530
+  (val AUROC 0.5798 vs heuristic 0.4170, deterministic across re-runs).

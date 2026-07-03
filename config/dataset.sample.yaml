@@ -134,6 +134,11 @@ assemble:
     fractions: { train: 0.7, val: 0.15, test: 0.10, human_eval: 0.05 }
     group_key: incident_id
 
+encoder:
+  kind: baseline               # smoke path stays dependency-light (no torch)
+  dim: 16
+  device: cuda
+
 runtime:
   log_level: WARNING
   log_format: text
