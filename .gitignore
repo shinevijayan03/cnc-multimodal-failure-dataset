@@ -1,4 +1,7 @@
 # --- Raw + processed data (large / licensed; never committed) ---
+# Generated sample data (scripts/generate_sample_data.py) is recreatable.
+data_pipeline/data_raw_sample/
+data_pipeline/data_processed_sample/
 data_raw/**
 !data_raw/**/.gitkeep
 data_processed/**
@@ -30,6 +33,7 @@ htmlcov/
 Thumbs.db
 .vscode/
 .idea/
+.claude/settings.local.json
 
 # --- Local archives / large blobs (never committed) ---
 archive*/

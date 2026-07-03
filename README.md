@@ -32,6 +32,14 @@ python -m src.cli evaluate --tier mvp              # grade PASS/WARN/FAIL + writ
 streamlit run streamlit_app.py                     # browse aligned incident evidence
 ```
 
+No staged data yet? Generate a tiny synthetic corpus and smoke the pipeline
+end-to-end (see [docs/runbook.md](docs/runbook.md)):
+
+```bash
+python scripts/generate_sample_data.py
+python -m src.cli all --config config/dataset.sample.yaml
+```
+
 Per-stage (each supports `--limit N` and `--dry-run`):
 
 ```bash

@@ -93,3 +93,48 @@ Decision:
 Status:
 - Accepted in user spec.
 - `ExplanationOutput` and `ChainClaim` are implemented.
+
+## D10 - Window Convention Operationalization (Build Phase 1 gate)
+
+Decision:
+- The ETL incident window (currently ±8s around the detected event for the
+  staged corpus) remains the *incident span* producer; it widens toward
+  [-60, +30] only when source recordings are long enough.
+- The encoder/grounding layer carves 12-second sub-windows (stride 3 s, per D1)
+  from within the incident span; `contracts.core.SensorWindow` is the contract.
+- The default *query window* for explanation generation is [-12s, 0s] relative
+  to the event anchor (matches the target diagram).
+- Where a recording cannot cover a convention (e.g. 20 s runs), the available
+  span is used and recorded; no synthetic padding is invented.
+
+Status:
+- Approved by user 2026-07-03 at the audit review gate
+  ("Approved" — see docs/architecture_audit/13_recommended_build_roadmap.md §First build phase).
+- Implementation lands in Build Phases 2–3.
+
+## D11 - GPU-First Execution Policy
+
+Decision:
+- All model components (encoder training/inference, embeddings, VLM, decoder
+  LLM) always use the local GPU. CPU fallbacks may exist for tests only and
+  must be marked as such.
+- Any GPU limitation (VRAM, kernel, driver) is reported back to the user as a
+  re-architecture input, not silently worked around.
+
+Hardware baseline (probed 2026-07-03):
+- NVIDIA GeForce RTX 3060, 12 GB VRAM, driver 595.79, CUDA 13.2 (WDDM).
+- torch 2.6.0+cu124 installed; `torch.cuda.is_available() == True`.
+
+Known implications (reported at Phase 1 gate):
+- Qwen2.5-VL-7B fp16 (~15-16 GB) does not fit in 12 GB → Phase 7 must use an
+  int4/AWQ-quantized 7B or the 3B variant; user decision scheduled at the
+  Phase 7 entry gate. Constitution I-1 (frozen VLM) is unaffected by
+  quantization.
+- Decoder path per D2 (Q4_K_M GGUF via llama.cpp, ~4.7 GB for 7B) fits 12 GB
+  alongside GBNF decoding.
+- Encoder (Phase 4, PatchTST-scale) and BGE-base embeddings (Phase 5) fit
+  comfortably.
+
+Status:
+- Approved by user 2026-07-03 ("use the local gpu always, report back issues
+  with the gpu so that we can re architect to match the gpu").

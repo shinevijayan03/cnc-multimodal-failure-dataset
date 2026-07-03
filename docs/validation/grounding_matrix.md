@@ -29,4 +29,15 @@ load-bearing claims:
 
 ## Build phases
 
-(rows appended at each phase gate — PENDING)
+### Phase 1 (2026-07-03)
+
+| Claim | Evidence Source | File/Command/Test/Log | Confidence | Inference? | Status |
+|---|---|---|---|---|---|
+| Fresh-clone bootstrap works end-to-end | command | `python scripts/generate_sample_data.py` then `python -m src.cli all --config config/dataset.sample.yaml` → sensor 5 / text 13 / video 2 / assemble 5 written, exit 0 | High | No | Verified |
+| Sample path cannot touch real data | files | `config/dataset.sample.yaml` paths all under `*_sample`; gitignored | High | No | Verified |
+| Generator is deterministic | test | `tests/unit/test_sample_data.py::test_generation_is_deterministic` (byte-identical) | High | No | Verified |
+| Suite green incl. new tests | command | `pytest -q --cov...` → 110 passed, 1 skipped | High | No | Verified |
+| Coverage is 80% (now measured, was README-reported) | command | same run → TOTAL 2340/466 = 80% | High | No | Verified |
+| GPU: RTX 3060 12 GB, CUDA usable from torch | command | `nvidia-smi`; `torch 2.6.0+cu124 cuda_available True` | High | No | Verified |
+| Qwen2.5-VL-7B fp16 will not fit 12 GB VRAM | sizing arithmetic (7B × 2 bytes + vision tower + KV cache ≈ 15–16 GB) | reported in D11; to be confirmed empirically at Phase 7 entry | Medium | Yes | Inference |
+| No application code modified in Phase 1 | command | `git status` diff set: scripts/config/tests/docs only | High | No | Verified |

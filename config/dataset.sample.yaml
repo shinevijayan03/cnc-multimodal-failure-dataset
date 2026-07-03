@@ -1,0 +1,140 @@
+# =============================================================================
+# dataset.sample.yaml — fresh-clone smoke configuration
+# -----------------------------------------------------------------------------
+# Companion to scripts/generate_sample_data.py. Reads the synthetic raw data in
+# data_pipeline/data_raw_sample and writes to data_pipeline/data_processed_sample,
+# so it never touches the real staged corpus or its processed artifacts.
+#
+#   python scripts/generate_sample_data.py
+#   python -m src.cli all --config config/dataset.sample.yaml
+#
+# The synthetic "bad" runs carry one transient burst each, so this config uses
+# the zscore detector (unlike config/dataset.yaml, which uses quantile for the
+# continuous-machining staged corpus). Scale-tier evaluation (`evaluate`) is not
+# meaningful on this tiny set and is expected to FAIL on scale metrics.
+# =============================================================================
+
+version: 0.1.0
+random_seed: 1337
+
+paths:
+  data_raw: data_pipeline/data_raw_sample
+  data_processed: data_pipeline/data_processed_sample
+  raw_sensor_root: data_pipeline/data_raw_sample/sensor_dataset
+  raw_video_root: data_pipeline/data_raw_sample/video_raw
+  raw_text_root: data_pipeline/data_raw_sample/text_manuals
+  sensor_windows_dir: data_pipeline/data_processed_sample/sensor_windows
+  sensor_index: data_pipeline/data_processed_sample/sensor_windows.parquet
+  video_dir: data_pipeline/data_processed_sample/video
+  video_index: data_pipeline/data_processed_sample/video_index.parquet
+  text_chunks: data_pipeline/data_processed_sample/text_chunks.parquet
+  incidents_index: data_pipeline/data_processed_sample/incidents.parquet
+  logs_dir: data_pipeline/logs
+
+sensor:
+  datasets:
+    - name: sample_cnc
+      enabled: true
+      path: data_pipeline/data_raw_sample/sensor_dataset
+      reader: generic_csv
+      machine_family: cnc_mill
+      fs_hz: 2000
+      column_map: { x: ax, y: ay, z: az }
+
+  canonical_channels: [time_s, ax, ay, az]
+  optional_channels: []
+
+  fs_estimation:
+    method: median_dt
+    min_plausible_hz: 100
+    max_plausible_hz: 100000
+
+  event_detection:
+    method: rms_threshold
+    channel_for_energy: az
+    window_s: 0.5
+    hop_s: 0.1
+    threshold_kind: zscore      # synthetic bursts are transients
+    threshold_value: 4.0
+    baseline_window_s: 5.0
+    min_event_separation_s: 5.0
+    min_event_duration_s: 0.1
+
+  windowing:
+    pre_event_s: 8.0
+    post_event_s: 8.0
+    drop_partial_windows: false
+    max_windows_per_run: 1
+
+  evidence_spans:
+    method: threshold_crossings
+    pad_s: 1.0
+    max_spans: 5
+
+  output_format: parquet
+
+video:
+  normalize:
+    enabled: true
+    target_height: 720
+    target_fps: 30
+    target_codec: libx264
+    container: mp4
+    clip_min_s: 5
+    clip_max_s: 10
+    ffmpeg_path: ffmpeg
+    overwrite: false
+  regime_labels: [roughing, finishing, plunge, idle, drilling, contouring]
+  condition_labels: [normal, tool_wear_visible, heavy_vibration, coolant_issue, chatter, chip_packing]
+  tagging_csv: data_pipeline/data_raw_sample/video_raw/video_tags.csv
+
+text:
+  input_formats: [md, markdown, txt]
+  chunking:
+    target_tokens: 60
+    min_tokens: 20
+    max_tokens: 120
+    overlap_tokens: 10
+    respect_headings: true
+    tokenizer: whitespace       # zero optional dependencies for the smoke path
+  doc_types: [sop, maintenance]
+  topic_keywords:
+    vibration: [vibration, chatter, oscillation, resonance, amplitude]
+    tool_wear: [tool wear, worn, flank wear, dull, edge breakdown]
+    clamping: [clamp, fixture, workholding, vise, runout]
+    coolant: [coolant, lubricant, flood, overheating]
+    spindle: [spindle, bearing, rpm]
+    feed_speed: [feed rate, spindle speed, depth of cut]
+
+assemble:
+  video_match:
+    strategy: label_match
+    require_regime_match: false
+    require_condition_match: false
+    allow_reuse: true
+    fallback_to_idle: true
+  text_retrieval:
+    method: keyword_bm25
+    sop_chunks_min: 1
+    sop_chunks_max: 3
+    maintenance_chunks_min: 1
+    maintenance_chunks_max: 3
+    failure_to_topics:
+      tool_wear: [tool_wear, vibration, feed_speed]
+      chatter: [vibration, spindle, feed_speed]
+      clamping_loss: [clamping, vibration]
+      coolant_fault: [coolant, spindle]
+      unknown: [vibration, tool_wear]
+  label_fields: [phase_label, regime_label, severity_label, root_cause_label]
+  default_label: unknown
+  split:
+    strategy: grouped_by_source
+    fractions: { train: 0.7, val: 0.15, test: 0.10, human_eval: 0.05 }
+    group_key: incident_id
+
+runtime:
+  log_level: WARNING
+  log_format: text
+  fail_fast: false
+  num_workers: 1
+  dry_run: false
