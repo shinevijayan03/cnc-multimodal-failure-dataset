@@ -35,6 +35,7 @@ class PathsCfg(BaseModel):
     text_chunks: str = "data_processed/text_chunks.parquet"
     incidents_index: str = "data_processed/incidents.parquet"
     subwindows_index: str = "data_processed/subwindows.parquet"
+    sensor_features_index: str = "data_processed/sensor_features.parquet"
     logs_dir: str = "logs"
 
 

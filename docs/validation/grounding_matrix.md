@@ -52,3 +52,22 @@ load-bearing claims:
 | Staged recordings cover only ±8 s of the convention → query coverage ≈ 0.67 by construction | command output + D10 | same summary; `--show` rows (query [-8,0], clipped=True) | High | No | Verified |
 | No val KPI regression from Phase 2 | command | `python -m src.cli evaluate --tier mvp` → GRADE: PASS; `src/eval/` untouched | High | No | Verified |
 | Suite green after phase | command | `pytest -q` → 121 passed, 1 skipped | High | No | Verified |
+
+### UI temporal alignment refactor (2026-07-03)
+
+| Claim | Evidence Source | File/Command/Test/Log | Confidence | Inference? | Status |
+|---|---|---|---|---|---|
+| Workbench UI matches reference shots; unified 0-based axis fixes video/sensor misalignment | code + tests + user confirmation | `src/ui/workbench.py`, `streamlit_app.py`; AppTest render tests; user: "yes" (DEMO matches) | High | No | Verified |
+| Light theme applied per user's original-UI screenshot | files + user approval | `.streamlit/config.toml`; "Approved and now move to Build Phase 3" | High | No | Verified |
+| Suite after UI phases | command | `pytest -q` → 144 passed, 1 skipped | High | No | Verified |
+
+### Phase 3 (2026-07-03)
+
+| Claim | Evidence Source | File/Command/Test/Log | Confidence | Inference? | Status |
+|---|---|---|---|---|---|
+| Spectral bands (4) live on the one feature path and localize tones correctly | tests | `test_spectral_bands_localize_known_tones`, `..._ignore_dc_offset` | High | No | Verified |
+| ETL sliding-RMS unified into the feature path with identical numerics (I-3, audit R-5 retired) | tests | agreement meta-test rel 1e-9; ETL source contains no own math; integration tests unchanged (164 passed) | High | No | Verified |
+| Patch geometry per D12: 12 s @ 2 kHz → 95 × 3 × 500, tails dropped | tests + corpus | `test_patch_spec_geometry_matches_d12`; real corpus `n_patches` uniformly 95 | High | No | Verified |
+| Real corpus features: 3399 windows, 0 skipped, unique IDs + sha256s, contract sample validated | command | `python -m src.tgfx.sensor_features --config config/dataset.yaml` + pandas describe | High | No | Verified |
+| Anomaly scores are near zero on the continuous-machining corpus (mean 0.0052) | command output | same summary; expected — sub-windows of a sustained cut resemble each other | High | No | Verified |
+| No val KPI regression | command | `evaluate --tier mvp` → GRADE: PASS; `src/eval/` untouched | High | No | Verified |

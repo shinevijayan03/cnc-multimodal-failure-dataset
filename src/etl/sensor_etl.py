@@ -26,6 +26,7 @@ from ..common.config import (
 )
 from ..common.errors import ReaderError
 from ..common.ids import incident_id
+from ..features.vibration import sliding_rms
 from ..common.io_utils import exists_and_fresh, rows_to_df, write_parquet_atomic
 from ..common.logging_utils import RunSummary, get_logger
 from ..common.schemas import FailureFamily, SensorWindowRow, Span
@@ -244,16 +245,9 @@ class EventDetector:
         return x - float(np.mean(x))  # remove DC / mounting offset before RMS
 
     def _sliding_rms(self, x: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
-        win = max(1, int(round(self.cfg.window_s * fs)))
-        hop = max(1, int(round(self.cfg.hop_s * fs)))
-        if x.size < win:
-            return np.empty(0), np.empty(0)
-        x2 = x.astype("float64") ** 2
-        csum = np.concatenate([[0.0], np.cumsum(x2)])
-        starts = np.arange(0, x.size - win + 1, hop)
-        rms = np.sqrt((csum[starts + win] - csum[starts]) / win)
-        centers = (starts + win // 2) / fs
-        return rms, centers
+        # Feature math lives on the one feature path (I-3); the implementation
+        # moved verbatim to src/features/vibration.py in Build Phase 3.
+        return sliding_rms(x, fs, self.cfg.window_s, self.cfg.hop_s)
 
     def detect(self, df: pd.DataFrame, fs_hz: float, cfg: EventDetectionCfg | None = None
                ) -> list[Event]:

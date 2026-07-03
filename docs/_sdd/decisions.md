@@ -138,3 +138,24 @@ Known implications (reported at Phase 1 gate):
 Status:
 - Approved by user 2026-07-03 ("use the local gpu always, report back issues
   with the gpu so that we can re architect to match the gpu").
+
+## D12 - Patch Geometry and Canonical Window Signal (Build Phase 3)
+
+Decision:
+- Patch tokens are 0.25 s slices with 0.125 s stride (50% overlap); at the
+  staged 2 kHz rate a 12 s sub-window yields 95 patches of 500 samples.
+  Incomplete tail patches are dropped, never padded (mirrors D10).
+- The canonical per-window scalar-feature signal is the tri-axial magnitude
+  sqrt(ax^2+ay^2+az^2) with its median removed (DC mounting offset), so RMS /
+  kurtosis / variance / spectral bands reflect vibration, not the mount.
+- Spectral energy uses 4 equal-width bands from 0 Hz to Nyquist
+  (contract `SensorWindow.spectral_energy` fixes n=4).
+- The heuristic anomaly score is delta/(1+delta) of the window RMS rise over
+  the incident's earliest sub-window (feature_delta from the one feature
+  path); it is a Phase 3 placeholder until the trained encoder (Phase 4).
+
+Status:
+- Adopted 2026-07-03 in Build Phase 3; implemented in
+  `src/features/patching.py`, `src/features/vibration.py`
+  (spectral_bands, sliding_rms moved from the ETL), and
+  `src/tgfx/sensor_features.py`.

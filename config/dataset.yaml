@@ -36,6 +36,7 @@ paths:
   text_chunks: data_pipeline/data_processed/text_chunks.parquet
   incidents_index: data_pipeline/data_processed/incidents.parquet
   subwindows_index: data_pipeline/data_processed/subwindows.parquet
+  sensor_features_index: data_pipeline/data_processed/sensor_features.parquet
 
   logs_dir: data_pipeline/logs
 
