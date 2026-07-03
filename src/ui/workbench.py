@@ -42,7 +42,8 @@ ROW_COLORS = {
     "SENSOR": TEAL, "VIDEO": VIOLET, "SOP": GREEN, "AI CLAIMS": AMBER, "NOTES": CYAN,
 }
 
-SOURCE_BADGE = {"incident": "", "derived": "", "demo": " · demo", "user": " · note"}
+SOURCE_BADGE = {"incident": "", "derived": "", "demo": " · demo",
+                "user": " · note", "retrieval": ""}
 
 DEMO_INCIDENT_ID = "DEMO_simulated_incident"
 
@@ -398,6 +399,105 @@ def build_sop_cards(incident: pd.Series, sop_chunks: pd.DataFrame,
                 "text": text,
                 "source": "demo",  # the % score is demo; ids/text/tags are real
             })
+    return cards
+
+
+# --------------------------------------------------------------------------- #
+# Real pipeline artifacts (Phases 2-5) surfaced into the UI
+# --------------------------------------------------------------------------- #
+def incident_feature_rows(features: pd.DataFrame, incident_id: str,
+                          hvib: pd.DataFrame | None = None) -> pd.DataFrame:
+    """Per-sub-window feature table for one incident (sensor_features.parquet),
+    joined with encoder anomaly scores from hvib.parquet when present.
+
+    Encoder scores exist only for train/val windows — test-split incidents
+    show NaN (quarantined per I-4), which the UI labels explicitly.
+    """
+    if features.empty or "incident_id" not in features.columns:
+        return pd.DataFrame()
+    rows = features[features["incident_id"] == incident_id].copy()
+    if rows.empty:
+        return rows
+    keep = ["window_id", "t_start", "t_end", "rms", "kurtosis", "variance",
+            "anomaly_score", "important_start_s", "important_end_s",
+            "spec_band_0", "spec_band_1", "spec_band_2", "spec_band_3"]
+    rows = rows[[c for c in keep if c in rows.columns]].rename(
+        columns={"anomaly_score": "anomaly_heuristic"})
+    if hvib is not None and not hvib.empty and "window_id" in hvib.columns:
+        enc = hvib[["window_id", "anomaly_score"]].rename(
+            columns={"anomaly_score": "anomaly_encoder"})
+        rows = rows.merge(enc, on="window_id", how="left")
+    else:
+        rows["anomaly_encoder"] = float("nan")
+    return rows.sort_values("t_start").reset_index(drop=True)
+
+
+def important_interval_events(feature_rows: pd.DataFrame, rel_offset: float,
+                              t0: float, t1: float) -> list[TimelineEvent]:
+    """Real important-interval bars (Phase 3 peak-RMS segments) on the axis."""
+    events = []
+    for i, row in feature_rows.iterrows():
+        lo = float(row["important_start_s"]) + rel_offset
+        hi = float(row["important_end_s"]) + rel_offset
+        lo, hi = max(lo, t0), min(hi, t1)
+        if hi <= lo:
+            continue
+        events.append(TimelineEvent(
+            event_id=f"ev_imp_{i:02d}", row="SENSOR",
+            label=f"Important interval ({row['window_id']})",
+            t_start=lo, t_end=hi, source="derived", color=CYAN,
+            detail="peak 1 s sliding-RMS segment from sensor_features.parquet"))
+    return events
+
+
+def encoder_summary(feature_rows: pd.DataFrame, split: str) -> dict:
+    """Header-chip summary of encoder anomaly for one incident."""
+    if split == "test":
+        return {"status": "quarantined",
+                "text": "Encoder anomaly: test-quarantined (I-4)"}
+    scores = feature_rows.get("anomaly_encoder")
+    if scores is None or scores.dropna().empty:
+        return {"status": "missing",
+                "text": "Encoder anomaly: not computed (run src.encoder.train)"}
+    return {"status": "ok",
+            "text": f"Encoder anomaly: {float(scores.max()):.3f} (max over windows)"}
+
+
+def quality_chip(quality_labels: dict[str, int], incident_id: str,
+                 split: str) -> dict:
+    """Real recovered good/bad run label for the header (run-level, D13)."""
+    if split == "test":
+        return {"status": "quarantined", "text": "Run label: test-quarantined (I-4)"}
+    label = quality_labels.get(incident_id)
+    if label is None:
+        return {"status": "missing", "text": "Run label: unknown"}
+    return {"status": "bad" if label == 1 else "good",
+            "text": f"Run label: {'BAD' if label == 1 else 'good'} (recovered)"}
+
+
+def default_retrieval_query(incident: pd.Series) -> str:
+    """Seed query for live SOP retrieval from real incident context."""
+    failure = str(incident.get("failure_family", "unknown")).replace("_", " ")
+    return f"{failure} vibration anomaly diagnosis and corrective action"
+
+
+def live_retrieval_cards(hits: list[dict], embedder_name: str) -> list[dict]:
+    """SOP cards from real vector-store hits — scores are real cosine similarities."""
+    cards = []
+    for hit in hits:
+        tags = str(hit.get("topic_tags", "") or "")
+        text = str(hit.get("text", ""))
+        cards.append({
+            "ref": str(hit.get("citation", hit.get("chunk_id", ""))),
+            "title": (" ".join(text.split())[:80] + "…") if text else hit["chunk_id"],
+            "match_pct": int(round(float(hit["score"]) * 100)),
+            "status": "Matched" if float(hit["score"]) >= 0.60 else "Partially Matched",
+            "phrases": [t.replace("_", " ") for t in tags.split(",") if t],
+            "equipment": str(hit.get("doc_type", "")),
+            "section": f"cosine {float(hit['score']):.4f} · {embedder_name}",
+            "text": text,
+            "source": "retrieval",       # real scores, not demo
+        })
     return cards
 
 

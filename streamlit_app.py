@@ -44,12 +44,18 @@ from src.ui.workbench import (
     build_claim_rows,
     build_sop_cards,
     build_timeline_events,
+    default_retrieval_query,
     demo_incident,
     demo_sensor_frame,
+    encoder_summary,
     events_frame,
     export_report_json,
+    important_interval_events,
     incident_axis,
+    incident_feature_rows,
     live_readouts,
+    live_retrieval_cards,
+    quality_chip,
     rolling_rms_frame,
     video_offset_for,
 )
@@ -168,6 +174,35 @@ def _display_frame(sensor_file: str) -> tuple[pd.DataFrame, float, float, float]
     _path, sensor_df = load_sensor_window(pseudo, repo_root())
     t0, t1, rel_offset = incident_axis(sensor_df)
     return rolling_rms_frame(sensor_df, rel_offset), t0, t1, rel_offset
+
+
+@st.cache_data(show_spinner=False)
+def _load_optional_parquet(path_str: str) -> pd.DataFrame:
+    from pathlib import Path
+    path = Path(path_str)
+    return pd.read_parquet(path) if path.exists() else pd.DataFrame()
+
+
+@st.cache_data(show_spinner=False)
+def _load_quality_labels() -> dict:
+    from src.encoder.train import load_quality_labels
+    return load_quality_labels()
+
+
+@st.cache_resource(show_spinner="Loading vector store + embedder…")
+def _load_retrieval(store_path: str):
+    """(store, embedder) for live SOP search; None when no index is built."""
+    from pathlib import Path
+
+    from src.retrieval.embeddings import build_embedder
+    from src.retrieval.store import VectorStore
+    if not Path(store_path).exists():
+        return None
+    store = VectorStore.load(store_path)
+    kind = "hashing" if store.embedder_name == "hashing_fallback" else "bge"
+    embedder = build_embedder(kind)
+    store.require_embedder(embedder.name)
+    return store, embedder
 
 
 # --------------------------------------------------------------------------- #
@@ -403,15 +438,31 @@ def _render_sop_cards(cards: list[dict]) -> None:
                 st.write(card["text"])
 
 
-def _render_evidence_panel(incident: pd.Series, cards: list[dict],
-                           events, state: PlaybackState) -> None:
+def _render_evidence_panel(incident: pd.Series, linked_cards: list[dict],
+                           events, state: PlaybackState, retrieval) -> None:
     _panel_head("SOP EVIDENCE &", "EXPLANATION")
     sop_tab, ai_tab, claims_tab = st.tabs(["SOP Evidence", "AI Explanation",
                                            "Claim Verification"])
     with sop_tab:
         box = st.container(height=400, border=False)
         with box:
-            _render_sop_cards(cards)
+            if retrieval is not None:
+                store, embedder = retrieval
+                query = st.text_input(
+                    "Live retrieval (real vector search)",
+                    value=default_retrieval_query(incident),
+                    key=f"wb_sop_query_{incident.get('incident_id', '')}")
+                if query.strip():
+                    hits = store.search(embedder.embed([query], queries=True)[0], k=4)
+                    st.caption(f"top {len(hits)} of {len(store)} chunks · "
+                               f"embedder: {store.embedder_name} · scores are "
+                               f"real cosine similarities")
+                    _render_sop_cards(live_retrieval_cards(hits, store.embedder_name))
+            else:
+                st.info("No vector index built — run "
+                        "`python -m src.retrieval.build_index` (Phase 5).")
+            with st.expander("Chunks linked at dataset build (keyword-topic)"):
+                _render_sop_cards(linked_cards)
     with ai_tab:
         for sentence in build_ai_explanation(incident, events):
             badge = "" if sentence["source"] == "incident" else "  `demo`"
@@ -500,8 +551,19 @@ def main() -> None:
     _init_playback(selected, t0, t1)
     state = _state()
 
+    # ---- real pipeline artifacts (Phases 2-5) ----
+    features = _load_optional_parquet(f"{processed_dir}/sensor_features.parquet")
+    hvib = _load_optional_parquet(f"{processed_dir}/hvib.parquet")
+    quality = _load_quality_labels()
+    retrieval = _load_retrieval(f"{processed_dir}/vector_store.parquet")
+    split = str(incident.get("split", "unknown"))
+    feature_rows = (pd.DataFrame() if is_demo
+                    else incident_feature_rows(features, selected, hvib))
+
     events = build_timeline_events(incident, t0, t1, rel_offset=rel_offset,
                                    user_notes=_user_notes())
+    if not feature_rows.empty:
+        events = events + important_interval_events(feature_rows, rel_offset, t0, t1)
     if is_demo:
         cards = build_sop_cards(incident, pd.DataFrame(), pd.DataFrame())
     else:
@@ -510,13 +572,27 @@ def main() -> None:
     explanation = build_ai_explanation(incident, events)
     claims = build_claim_rows(events)
 
+    # ---- real-status chips (Phase 4 artifacts; test split stays quarantined) ----
+    if not is_demo:
+        enc = encoder_summary(feature_rows, split)
+        qual = quality_chip(quality, selected, split)
+        enc_cls = {"ok": "", "quarantined": "demo", "missing": "demo"}[enc["status"]]
+        qual_cls = {"good": "", "bad": "on-red",
+                    "quarantined": "demo", "missing": "demo"}[qual["status"]]
+        st.markdown(
+            f'<span class="wb-chip {qual_cls}">{qual["text"]}</span>'
+            f'<span class="wb-chip {enc_cls}">{enc["text"]}</span>'
+            f'<span class="wb-chip">Sub-windows: {len(feature_rows)}</span>'
+            f'<span class="wb-chip">Split: {split}</span>',
+            unsafe_allow_html=True)
+
     # ---- main grid ----
     video_col, sensor_col, evidence_col = st.columns([0.30, 0.38, 0.32], gap="small")
     with video_col, st.container(border=True, height=PANEL_HEIGHT):
         _render_video_panel(incident, state, events, tables.video_index, is_demo)
         state = _state()  # transport may have mutated the shared clock
     with evidence_col, st.container(border=True, height=PANEL_HEIGHT):
-        _render_evidence_panel(incident, cards, events, state)
+        _render_evidence_panel(incident, cards, events, state, retrieval)
     with sensor_col, st.container(border=True, height=PANEL_HEIGHT):
         channels = list(display["channel"].unique())
         default = [c for c in ("Vib RMS", "Pressure Var", "Temp Delta") if c in channels] \
@@ -544,6 +620,15 @@ def main() -> None:
             _render_readouts(readouts, live.current_time_s)
 
         _sensor_live()
+
+        if not feature_rows.empty:
+            with st.expander(f"Sub-window features · {len(feature_rows)} windows "
+                             f"(real, Phases 2-4)"):
+                show = feature_rows.copy()
+                show["anomaly_encoder"] = show["anomaly_encoder"].map(
+                    lambda v: "quarantined (I-4)" if split == "test"
+                    else ("—" if pd.isna(v) else f"{v:.3f}"))
+                st.dataframe(show.round(4), hide_index=True, width="stretch")
 
     # ---- temporal alignment timeline ----
     head_l, play_c, stop_c, export_c = st.columns([0.55, 0.13, 0.10, 0.22],
