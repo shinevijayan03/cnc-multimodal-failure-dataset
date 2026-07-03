@@ -41,3 +41,14 @@ load-bearing claims:
 | GPU: RTX 3060 12 GB, CUDA usable from torch | command | `nvidia-smi`; `torch 2.6.0+cu124 cuda_available True` | High | No | Verified |
 | Qwen2.5-VL-7B fp16 will not fit 12 GB VRAM | sizing arithmetic (7B × 2 bytes + vision tower + KV cache ≈ 15–16 GB) | reported in D11; to be confirmed empirically at Phase 7 entry | Medium | Yes | Inference |
 | No application code modified in Phase 1 | command | `git status` diff set: scripts/config/tests/docs only | High | No | Verified |
+
+### Phase 2 (2026-07-03)
+
+| Claim | Evidence Source | File/Command/Test/Log | Confidence | Inference? | Status |
+|---|---|---|---|---|---|
+| D10 carving implemented (12 s / stride 3 / clipped to [-60,+30] / no padding) | code + tests | `src/tgfx/windows.py`; `pytest tests/unit/test_tgfx_windows.py -q` → 11 passed | High | No | Verified |
+| SW_* IDs byte-compatible with eval fixture scheme | test | `test_sensor_evidence_id_matches_fixture_scheme` vs `src/eval/fixtures.py` (`SW_inc_oracle_001_00`) | High | No | Verified |
+| Real corpus: 1702 incidents → 3399 sub-windows, 0 short spans, mean query coverage 0.6664 | command | `python -m src.tgfx.windows --config config/dataset.yaml` JSON summary | High | No | Verified |
+| Staged recordings cover only ±8 s of the convention → query coverage ≈ 0.67 by construction | command output + D10 | same summary; `--show` rows (query [-8,0], clipped=True) | High | No | Verified |
+| No val KPI regression from Phase 2 | command | `python -m src.cli evaluate --tier mvp` → GRADE: PASS; `src/eval/` untouched | High | No | Verified |
+| Suite green after phase | command | `pytest -q` → 121 passed, 1 skipped | High | No | Verified |

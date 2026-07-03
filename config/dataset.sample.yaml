@@ -29,6 +29,7 @@ paths:
   video_index: data_pipeline/data_processed_sample/video_index.parquet
   text_chunks: data_pipeline/data_processed_sample/text_chunks.parquet
   incidents_index: data_pipeline/data_processed_sample/incidents.parquet
+  subwindows_index: data_pipeline/data_processed_sample/subwindows.parquet
   logs_dir: data_pipeline/logs
 
 sensor:
