@@ -1,10 +1,11 @@
-# Dark industrial theme for the incident workbench (UI temporal alignment refactor).
+# Light theme matching the original Recipe A explorer look (user feedback
+# 2026-07-03: white background, dark text, red accent).
 [theme]
-base = "dark"
-primaryColor = "#f59e0b"
-backgroundColor = "#0b0f17"
-secondaryBackgroundColor = "#111827"
-textColor = "#e5e7eb"
+base = "light"
+primaryColor = "#ff4b4b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#31333f"
 font = "sans serif"
 
 [server]

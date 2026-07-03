@@ -1,4 +1,27 @@
-# 10 — Feedback Incorporation v2 (2026-07-03)
+# 10 — Feedback Incorporation v2 + v3 (2026-07-03)
+
+## v3 — theme decision resolved
+
+User attached the original light explorer screenshot and confirmed: **light
+look and feel** ("look at the attached image, create similar look and feel").
+Applied:
+
+- `.streamlit/config.toml` → `base="light"`, white background, dark text,
+  Streamlit-red primary (matches the original explorer accent).
+- All workbench CSS recalibrated for white background (dark headings with red
+  accent word, light-gray chips, white SOP cards with subtle shadow,
+  green/amber Matched badges, red ANOMALY badge on light).
+- Event/chart palette moved from neon (dark-bg) tones to 600-level tones
+  (`src/ui/workbench.py` TEAL/CYAN/AMBER/RED/VIOLET/GREEN) so bars, lines,
+  regions, and the cursor stay legible on white.
+- Timeline axis grid/labels switched to light-theme grays.
+- Page title "CNC Incident Workbench" added (mirrors the original's big title).
+- DEMO incident confirmed by user as matching the simulated UI ("yes").
+
+Validation after the flip: `pytest -q` → 144 passed, 1 skipped; ruff clean;
+app healthz 200. Functionality unchanged — theme-only.
+
+## v2 — reference-screenshot rework
 
 User feedback on the first workbench iteration, with reference screenshots of
 a simulated target UI (4 dark shots) plus the original light explorer shot.

@@ -30,13 +30,13 @@ from src.features.vibration import rms
 
 TIMELINE_ROWS = ("SENSOR", "VIDEO", "SOP", "AI CLAIMS", "NOTES")
 
-# Event palette from the reference screenshots.
-TEAL = "#2dd4bf"
-CYAN = "#22d3ee"
-AMBER = "#fbbf24"
-RED = "#f87171"
-VIOLET = "#a78bfa"
-GREEN = "#34d399"
+# Event palette — 600-level tones, legible on the light/white background.
+TEAL = "#0d9488"
+CYAN = "#0891b2"
+AMBER = "#d97706"
+RED = "#dc2626"
+VIOLET = "#7c3aed"
+GREEN = "#059669"
 
 ROW_COLORS = {
     "SENSOR": TEAL, "VIDEO": VIOLET, "SOP": GREEN, "AI CLAIMS": AMBER, "NOTES": CYAN,

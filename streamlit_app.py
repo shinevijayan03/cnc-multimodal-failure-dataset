@@ -72,7 +72,7 @@ CHANNEL_UNITS = {
 
 
 # --------------------------------------------------------------------------- #
-# Styling — dark industrial, white primary text, cyan accents (reference look)
+# Styling — light theme matching the original explorer look (white bg, dark text)
 # --------------------------------------------------------------------------- #
 def _apply_styles() -> None:
     st.markdown(
@@ -81,50 +81,52 @@ def _apply_styles() -> None:
         .block-container { max-width: 1820px; padding-top: 0.7rem; padding-bottom: 1.2rem; }
         div[data-testid="stVideo"] video {
             max-height: 265px; object-fit: cover; background: #000;
-            border: 1px solid #164e63; border-radius: 4px;
+            border: 1px solid #e5e7eb; border-radius: 6px;
         }
         .wb-panel-head {
             display: flex; justify-content: space-between; align-items: baseline;
-            border-bottom: 1px solid #1e293b; padding-bottom: 0.3rem; margin-bottom: 0.4rem;
+            border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3rem; margin-bottom: 0.4rem;
         }
-        .wb-h { font-size: 0.86rem; font-weight: 800; letter-spacing: 0.10em;
-                color: #ffffff; text-transform: uppercase; }
-        .wb-h .acc { color: #22d3ee; }
-        .wb-h .dot { color: #ef4444; }
-        .wb-meta { font-size: 0.72rem; color: #22d3ee; font-family: monospace; }
+        .wb-h { font-size: 0.86rem; font-weight: 800; letter-spacing: 0.08em;
+                color: #111827; text-transform: uppercase; }
+        .wb-h .acc { color: #dc2626; }
+        .wb-h .dot { color: #dc2626; }
+        .wb-meta { font-size: 0.72rem; color: #6b7280; font-family: monospace; }
         .wb-chip {
             display: inline-block; padding: 0.10rem 0.5rem; margin: 0.12rem 0.22rem 0.12rem 0;
             border-radius: 4px; font-size: 0.72rem; font-weight: 600;
-            border: 1px solid #164e63; color: #67e8f9; background: rgba(34,211,238,0.06);
+            border: 1px solid #d1d5db; color: #374151; background: #f9fafb;
             font-family: monospace;
         }
-        .wb-chip.on-amber { border-color: #b45309; color: #fbbf24; background: rgba(251,191,36,0.10); }
-        .wb-chip.on-red   { border-color: #b91c1c; color: #f87171; background: rgba(248,113,113,0.10); }
-        .wb-chip.demo { border-color: #334155; color: #94a3b8; }
-        .wb-clock { font-family: monospace; font-size: 0.9rem; color: #e5e7eb; }
-        .wb-read { font-family: monospace; font-size: 0.78rem; color: #e5e7eb;
+        .wb-chip.on-amber { border-color: #f59e0b; color: #b45309; background: #fffbeb; }
+        .wb-chip.on-red   { border-color: #ef4444; color: #b91c1c; background: #fef2f2; }
+        .wb-chip.demo { border-color: #e5e7eb; color: #9ca3af; }
+        .wb-clock { font-family: monospace; font-size: 0.9rem; color: #111827; }
+        .wb-read { font-family: monospace; font-size: 0.78rem; color: #374151;
                    margin-right: 0.9rem; white-space: nowrap; }
-        .wb-read b { color: #ffffff; }
+        .wb-read b { color: #111827; }
         .wb-badge-anom {
-            background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid #b91c1c;
+            background: #fef2f2; color: #dc2626; border: 1px solid #fca5a5;
             border-radius: 3px; padding: 0 0.3rem; font-size: 0.68rem; font-weight: 700;
         }
         .wb-card {
-            border: 1px solid #1e293b; border-radius: 8px; background: #0f172a;
+            border: 1px solid #e5e7eb; border-radius: 8px; background: #ffffff;
             padding: 0.6rem 0.8rem; margin-bottom: 0.6rem;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.04);
         }
-        .wb-card .ref { color: #22d3ee; font-family: monospace; font-weight: 700; }
-        .wb-card .pct { float: right; color: #e5e7eb; font-family: monospace; }
-        .wb-card .title { color: #ffffff; font-weight: 700; margin: 0.15rem 0; }
-        .wb-card .foot { color: #64748b; font-size: 0.72rem; }
-        .wb-card .foot b { color: #94a3b8; }
-        .wb-status { border: 1px solid #0f766e; color: #2dd4bf; border-radius: 4px;
+        .wb-card .ref { color: #dc2626; font-family: monospace; font-weight: 700; }
+        .wb-card .pct { float: right; color: #111827; font-family: monospace; }
+        .wb-card .title { color: #111827; font-weight: 700; margin: 0.15rem 0; }
+        .wb-card .foot { color: #6b7280; font-size: 0.72rem; }
+        .wb-card .foot b { color: #374151; }
+        .wb-status { border: 1px solid #059669; color: #047857; border-radius: 4px;
                      padding: 0.05rem 0.45rem; font-size: 0.7rem; font-weight: 700;
-                     font-family: monospace; float: right; margin-left: 0.5rem; }
-        .wb-status.partial { border-color: #b45309; color: #fbbf24; }
+                     font-family: monospace; float: right; margin-left: 0.5rem;
+                     background: #ecfdf5; }
+        .wb-status.partial { border-color: #d97706; color: #b45309; background: #fffbeb; }
         .wb-phrase {
-            display: inline-block; color: #2dd4bf; background: rgba(45,212,191,0.08);
-            border: 1px solid #134e4a; border-radius: 3px; padding: 0 0.35rem;
+            display: inline-block; color: #047857; background: #ecfdf5;
+            border: 1px solid #a7f3d0; border-radius: 3px; padding: 0 0.35rem;
             margin: 0.1rem 0.2rem 0.1rem 0; font-size: 0.72rem; font-family: monospace;
         }
         </style>
@@ -431,14 +433,14 @@ def _render_evidence_panel(incident: pd.Series, cards: list[dict],
 def _timeline_chart(frame: pd.DataFrame, state: PlaybackState) -> alt.LayerChart:
     x_scale = alt.Scale(domain=[state.t0, state.t1])
     y = alt.Y("row:N", sort=list(TIMELINE_ROWS), title=None,
-              axis=alt.Axis(labelColor="#94a3b8", labelFontWeight="bold",
+              axis=alt.Axis(labelColor="#374151", labelFontWeight="bold",
                             labelFontSize=11, ticks=False, domain=False))
     bars = alt.Chart(frame).mark_bar(cornerRadius=3, height=18,
                                      stroke=None).encode(
         y=y,
         x=alt.X("t_start:Q", title=None, scale=x_scale,
                 axis=alt.Axis(format="~s", labelExpr="datum.value + 's'",
-                              labelColor="#64748b", grid=True, gridColor="#1e293b")),
+                              labelColor="#6b7280", grid=True, gridColor="#e5e7eb")),
         x2="t_end:Q",
         color=alt.Color("color:N", scale=None),
         opacity=alt.condition(alt.datum.active, alt.value(0.50), alt.value(0.22)),
@@ -480,6 +482,8 @@ def main() -> None:
         st.error("No incidents.parquet found. Run the pipeline first.")
         st.code("python -m src.cli all --config config/dataset.yaml", language="bash")
         return
+
+    st.title("CNC Incident Workbench")
 
     labels = incident_labels(incidents)
     labels = {DEMO_INCIDENT_ID: "🎬 DEMO — simulated incident (reference-UI scenario)",
