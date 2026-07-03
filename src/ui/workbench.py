@@ -43,7 +43,7 @@ ROW_COLORS = {
 }
 
 SOURCE_BADGE = {"incident": "", "derived": "", "demo": " · demo",
-                "user": " · note", "retrieval": ""}
+                "user": " · note", "retrieval": "", "grounded": ""}
 
 DEMO_INCIDENT_ID = "DEMO_simulated_incident"
 
@@ -473,6 +473,50 @@ def quality_chip(quality_labels: dict[str, int], incident_id: str,
         return {"status": "missing", "text": "Run label: unknown"}
     return {"status": "bad" if label == 1 else "good",
             "text": f"Run label: {'BAD' if label == 1 else 'good'} (recovered)"}
+
+
+def incident_tuples(tuples: pd.DataFrame, incident_id: str) -> pd.DataFrame:
+    """Aligned tuples (Phase 6 grounding) for one incident."""
+    if tuples.empty or "incident_id" not in tuples.columns:
+        return pd.DataFrame()
+    rows = tuples[tuples["incident_id"] == incident_id].copy()
+    return rows.sort_values("t_start").reset_index(drop=True)
+
+
+def grounded_sop_events(tuple_rows: pd.DataFrame, rel_offset: float,
+                        t0: float, t1: float) -> list[TimelineEvent]:
+    """REAL SOP timeline bars: retrieved evidence grounded to window spans.
+
+    The time span is the sub-window whose context retrieved the chunk — a real
+    association (retrieval grounding), not a measured document timestamp.
+    """
+    events = []
+    for i, row in tuple_rows.iterrows():
+        lo = max(float(row["t_start"]) + rel_offset, t0)
+        hi = min(float(row["t_end"]) + rel_offset, t1)
+        citation = str(row.get("retrieved_citation", "") or "")
+        if hi <= lo or not citation:
+            continue
+        events.append(TimelineEvent(
+            event_id=f"ev_gsop_{i:02d}", row="SOP",
+            label=f"{citation} ({float(row.get('retrieved_score', 0)):.2f})",
+            t_start=lo, t_end=hi, source="grounded", color=GREEN,
+            detail="real retrieval grounded to the window span that queried it "
+                   "(aligned_tuples.parquet)"))
+    return events
+
+
+def grounded_explanation(tuple_rows: pd.DataFrame) -> list[dict]:
+    """Real per-window sensor summaries from the aligned tuples."""
+    sentences = []
+    for _, row in tuple_rows.iterrows():
+        sentences.append({
+            "text": f"[{row['window_id']} · {row['alarm_state']}] "
+                    f"{row['sensor_summary']}",
+            "evidence": [str(row["window_id"])],
+            "source": "incident",
+        })
+    return sentences
 
 
 def default_retrieval_query(incident: pd.Series) -> str:

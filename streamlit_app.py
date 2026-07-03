@@ -50,9 +50,12 @@ from src.ui.workbench import (
     encoder_summary,
     events_frame,
     export_report_json,
+    grounded_explanation,
+    grounded_sop_events,
     important_interval_events,
     incident_axis,
     incident_feature_rows,
+    incident_tuples,
     live_readouts,
     live_retrieval_cards,
     quality_chip,
@@ -439,7 +442,8 @@ def _render_sop_cards(cards: list[dict]) -> None:
 
 
 def _render_evidence_panel(incident: pd.Series, linked_cards: list[dict],
-                           events, state: PlaybackState, retrieval) -> None:
+                           events, state: PlaybackState, retrieval,
+                           grounded_sentences: list[dict]) -> None:
     _panel_head("SOP EVIDENCE &", "EXPLANATION")
     sop_tab, ai_tab, claims_tab = st.tabs(["SOP Evidence", "AI Explanation",
                                            "Claim Verification"])
@@ -464,6 +468,13 @@ def _render_evidence_panel(incident: pd.Series, linked_cards: list[dict],
             with st.expander("Chunks linked at dataset build (keyword-topic)"):
                 _render_sop_cards(linked_cards)
     with ai_tab:
+        if grounded_sentences:
+            st.markdown("**Grounded sensor chronology (real, per sub-window):**")
+            for sentence in grounded_sentences:
+                st.markdown(f"- {sentence['text']} — evidence: "
+                            f"`{sentence['evidence'][0]}`")
+            st.divider()
+        st.markdown("**Narrative (decoder LLM lands in Phase 11):**")
         for sentence in build_ai_explanation(incident, events):
             badge = "" if sentence["source"] == "incident" else "  `demo`"
             refs = (" — evidence: " + ", ".join(sentence["evidence"])) if sentence["evidence"] else ""
@@ -560,8 +571,17 @@ def main() -> None:
     feature_rows = (pd.DataFrame() if is_demo
                     else incident_feature_rows(features, selected, hvib))
 
+    tuples = _load_optional_parquet(f"{processed_dir}/aligned_tuples.parquet")
+    tuple_rows = (pd.DataFrame() if is_demo
+                  else incident_tuples(tuples, selected))
+
     events = build_timeline_events(incident, t0, t1, rel_offset=rel_offset,
                                    user_notes=_user_notes())
+    if not tuple_rows.empty:
+        # Real grounding replaces the demo SOP bars (Phase 6).
+        grounded = grounded_sop_events(tuple_rows, rel_offset, t0, t1)
+        if grounded:
+            events = [e for e in events if e.row != "SOP"] + grounded
     if not feature_rows.empty:
         events = events + important_interval_events(feature_rows, rel_offset, t0, t1)
     if is_demo:
@@ -591,8 +611,10 @@ def main() -> None:
     with video_col, st.container(border=True, height=PANEL_HEIGHT):
         _render_video_panel(incident, state, events, tables.video_index, is_demo)
         state = _state()  # transport may have mutated the shared clock
+    grounded_sentences = grounded_explanation(tuple_rows) if not tuple_rows.empty else []
     with evidence_col, st.container(border=True, height=PANEL_HEIGHT):
-        _render_evidence_panel(incident, cards, events, state, retrieval)
+        _render_evidence_panel(incident, cards, events, state, retrieval,
+                               grounded_sentences)
     with sensor_col, st.container(border=True, height=PANEL_HEIGHT):
         channels = list(display["channel"].unique())
         default = [c for c in ("Vib RMS", "Pressure Var", "Temp Delta") if c in channels] \
@@ -655,6 +677,20 @@ def main() -> None:
                         width="stretch")
 
     _timeline_live()
+
+    # ---- temporal grounding (real aligned tuples, Phase 6) ----
+    if not tuple_rows.empty:
+        with st.expander(f"Temporal grounding · {len(tuple_rows)} aligned tuples "
+                         f"(real, contract-valid, evidence IDs resolve in the "
+                         f"evidence graph)"):
+            show = tuple_rows[["window_id", "t_start", "t_end", "alarm_state",
+                               "sensor_summary", "retrieved_citation",
+                               "retrieved_score", "evidence_ids"]].copy()
+            st.dataframe(show.round(4), hide_index=True, width="stretch")
+            st.caption("sensor_summary and spans are real (Phases 2-4); "
+                       "retrieved_citation is real vector retrieval (Phases 5-6) "
+                       "grounded by window-context association; video sync "
+                       "remains constructed (I-8).")
 
     # ---- details (preserved explorer functionality) ----
     with st.expander("Incident details · alignment summary · raw row"):
