@@ -36,6 +36,7 @@ class PathsCfg(BaseModel):
     incidents_index: str = "data_processed/incidents.parquet"
     subwindows_index: str = "data_processed/subwindows.parquet"
     sensor_features_index: str = "data_processed/sensor_features.parquet"
+    vector_store: str = "data_processed/vector_store.parquet"
     logs_dir: str = "logs"
 
 
@@ -201,6 +202,23 @@ class AssembleCfg(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Retrieval index (Build Phase 5)
+# --------------------------------------------------------------------------- #
+class RetrievalIndexCfg(BaseModel):
+    embedder: str = "bge"                # bge | hashing (fallback, clearly named)
+    model_name: str = "BAAI/bge-base-en-v1.5"
+    batch_size: int = Field(default=32, gt=0)
+    device: str = "cuda"                 # D11: local GPU always
+
+    @field_validator("embedder")
+    @classmethod
+    def _embedder_ok(cls, v: str) -> str:
+        if v not in {"bge", "hashing"}:
+            raise ValueError(f"retrieval.embedder '{v}' not in bge|hashing")
+        return v
+
+
+# --------------------------------------------------------------------------- #
 # Encoder (Build Phase 4)
 # --------------------------------------------------------------------------- #
 class EncoderCfg(BaseModel):
@@ -243,6 +261,7 @@ class PipelineConfig(BaseModel):
     text: TextCfg = Field(default_factory=TextCfg)
     assemble: AssembleCfg = Field(default_factory=AssembleCfg)
     encoder: EncoderCfg = Field(default_factory=EncoderCfg)
+    retrieval: RetrievalIndexCfg = Field(default_factory=RetrievalIndexCfg)
     runtime: RuntimeCfg = Field(default_factory=RuntimeCfg)
 
     # Populated by load_config(); the absolute repo root all relative paths resolve against.

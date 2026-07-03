@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 text = ["tiktoken>=0.5", "pypdf>=4.0", "python-docx>=1.1"]
-retrieval = ["rank-bm25>=0.2"]
+retrieval = ["rank-bm25>=0.2", "sentence-transformers>=2.4"]
 eval = ["matplotlib>=3.7"]
 encoder = ["torch>=2.2"]
 dev = ["pytest>=7.4", "pytest-cov>=4.1"]
@@ -37,6 +37,7 @@ packages = [
     "src.encoder",
     "src.etl",
     "src.eval",
+    "src.retrieval",
     "src.features",
     "src.tgfx",
     "src.ui",

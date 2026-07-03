@@ -37,6 +37,7 @@ paths:
   incidents_index: data_pipeline/data_processed/incidents.parquet
   subwindows_index: data_pipeline/data_processed/subwindows.parquet
   sensor_features_index: data_pipeline/data_processed/sensor_features.parquet
+  vector_store: data_pipeline/data_processed/vector_store.parquet
 
   logs_dir: data_pipeline/logs
 
@@ -232,6 +233,12 @@ assemble:
 # 6. Sensor encoder (Build Phase 4). Trains on the train split only; the test
 #    split is quarantined (constitution I-4). Device policy: D11 (local GPU).
 # -----------------------------------------------------------------------------
+retrieval:
+  embedder: bge                # bge | hashing (fallback; stores record their embedder)
+  model_name: BAAI/bge-base-en-v1.5
+  batch_size: 32
+  device: cuda
+
 encoder:
   kind: autoencoder            # autoencoder | baseline
   dim: 64                      # Hvib embedding dimension

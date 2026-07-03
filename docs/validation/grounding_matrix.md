@@ -82,3 +82,13 @@ load-bearing claims:
 | Test split mechanically refused by the token loader | test | `test_load_tokens_refuses_test_split` (PermissionError) | High | No | Verified |
 | cuBLAS determinism issue found + fixed on the RTX 3060 | log + code | first cuda run RuntimeError; `torch_ae.py` sets CUBLAS_WORKSPACE_CONFIG | High | No | Verified |
 | Suite green after phase | command | `pytest -q` → 174 passed, 1 skipped | High | No | Verified |
+
+### Phase 5 (2026-07-03)
+
+| Claim | Evidence Source | File/Command/Test/Log | Confidence | Inference? | Status |
+|---|---|---|---|---|---|
+| Real-corpus vector index: 934 chunks, BGE-base 768-d on GPU, 6.24 s | command | `python -m src.retrieval.build_index --config config/dataset.yaml` JSON summary | High | No | Verified |
+| Retrieval topically correct (bearing→vibration/spindle, coolant→coolant, doc-type filter works) | commands | three `src.retrieval.search` runs recorded in phase_5_validation_report §4 | High | No | Verified |
+| Reload recall@1 = 1.0; mismatched embedders refused; fallback clearly named | tests | `test_store_round_trip_persistence`, `test_store_refuses_mismatched_embedder`; sample store records `hashing_fallback` | High | No | Verified |
+| cp1252 console encoding bug found + fixed in search output | log + code | UnicodeEncodeError on \x95; `_println` ascii-replace fallback | High | No | Verified |
+| Suite green after phase | command | `pytest -q` → 185 passed, 1 skipped | High | No | Verified |

@@ -178,3 +178,25 @@ Status:
 - Adopted 2026-07-03 in Build Phase 4; implemented in `src/encoder/`;
   first run record: encoder_autoencoder_20260702_20260703T175903+0530
   (val AUROC 0.5798 vs heuristic 0.4170, deterministic across re-runs).
+
+## D14 - Embedder and Vector Store (Build Phase 5)
+
+Decision:
+- Chunk embeddings use BAAI/bge-base-en-v1.5 (768-d, L2-normalized, CLS
+  pooling via sentence-transformers) on the local GPU (D11), exactly matching
+  the `SOPChunk` contract declaration. Queries get the BGE retrieval prefix.
+- The vector store is exact brute-force cosine over normalized vectors,
+  persisted as one parquet file that records its embedder name; search
+  refuses mismatched embedders. At 934 chunks x 768 dims (~2.7 MB) an ANN
+  index is unnecessary; FAISS (already installed) is the documented scale-up
+  path if the corpus grows by orders of magnitude.
+- A deterministic hashing embedder exists ONLY as a clearly named fallback
+  (`hashing_fallback`) for tests and the model-less sample smoke path; stores
+  built with it can never masquerade as BGE.
+- Citation format: `<doc_type>:<doc_id>§<chunk_ordinal>` (e.g.
+  `sop:doc_9b792f170d38§c0021`).
+
+Status:
+- Adopted 2026-07-03 in Build Phase 5; implemented in `src/retrieval/`
+  (embeddings, store, build_index, search). Real-corpus index: 934 chunks
+  embedded on the RTX 3060 in 6.24 s.

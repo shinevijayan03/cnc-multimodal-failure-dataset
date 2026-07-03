@@ -31,6 +31,7 @@ paths:
   incidents_index: data_pipeline/data_processed_sample/incidents.parquet
   subwindows_index: data_pipeline/data_processed_sample/subwindows.parquet
   sensor_features_index: data_pipeline/data_processed_sample/sensor_features.parquet
+  vector_store: data_pipeline/data_processed_sample/vector_store.parquet
   logs_dir: data_pipeline/logs
 
 sensor:
@@ -138,6 +139,9 @@ encoder:
   kind: baseline               # smoke path stays dependency-light (no torch)
   dim: 16
   device: cuda
+
+retrieval:
+  embedder: hashing            # smoke path: no model download; clearly named fallback
 
 runtime:
   log_level: WARNING
