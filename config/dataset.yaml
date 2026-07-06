@@ -233,6 +233,13 @@ assemble:
 # 6. Sensor encoder (Build Phase 4). Trains on the train split only; the test
 #    split is quarantined (constitution I-4). Device policy: D11 (local GPU).
 # -----------------------------------------------------------------------------
+vision:
+  mode: vlm                    # vlm | tags_only (transparent fallback)
+  model_name: Qwen/Qwen2.5-VL-3B-Instruct   # D15: 3B bf16 fits the 12 GB RTX 3060
+  device: cuda
+  n_frames: 8
+  max_new_tokens: 160
+
 retrieval:
   embedder: bge                # bge | hashing (fallback; stores record their embedder)
   model_name: BAAI/bge-base-en-v1.5

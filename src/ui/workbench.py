@@ -519,6 +519,42 @@ def grounded_explanation(tuple_rows: pd.DataFrame) -> list[dict]:
     return sentences
 
 
+def video_summary_for(summaries: pd.DataFrame, video_file) -> dict | None:
+    """Real clip summary row (Phase 7 VLM / tags-only) for one incident's clip."""
+    if (summaries is None or summaries.empty or video_file is None
+            or pd.isna(video_file)):
+        return None
+    match = summaries[summaries["video_file"] == str(video_file)]
+    if match.empty:
+        return None
+    row = match.iloc[0]
+    return {
+        "summary": str(row["summary"]),
+        "labels": [str(x) for x in json.loads(row["visual_labels"])],
+        "confidence": float(row["confidence"]),
+        "model": str(row["model"]),
+        "mode": str(row["mode"]),
+    }
+
+
+def vlm_video_events(summary: dict, t0: float, t1: float) -> list[TimelineEvent]:
+    """Real VIDEO-row bar from the frozen-VLM clip summary.
+
+    The summary CONTENT is real model output on the actual linked clip; the
+    bar spans the whole axis because clip↔incident timing is constructed
+    (I-8) — stated in the tooltip.
+    """
+    label = ", ".join(summary["labels"][:3]) or summary["summary"][:40]
+    return [TimelineEvent(
+        event_id="ev_vlm_00", row="VIDEO",
+        label=f"{summary['mode'].upper()}: {label} "
+              f"({summary['confidence']:.2f})",
+        t_start=t0, t_end=t1, source="grounded", color=VIOLET,
+        detail=f"{summary['model']} on the linked clip — summary content is "
+               f"real; span covers the axis because sync is constructed (I-8). "
+               f"Summary: {summary['summary'][:160]}")]
+
+
 def default_retrieval_query(incident: pd.Series) -> str:
     """Seed query for live SOP retrieval from real incident context."""
     failure = str(incident.get("failure_family", "unknown")).replace("_", " ")

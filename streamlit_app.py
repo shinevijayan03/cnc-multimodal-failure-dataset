@@ -61,6 +61,8 @@ from src.ui.workbench import (
     quality_chip,
     rolling_rms_frame,
     video_offset_for,
+    video_summary_for,
+    vlm_video_events,
 )
 
 st.set_page_config(page_title="CNC Incident Workbench", page_icon="🏭", layout="wide")
@@ -574,9 +576,16 @@ def main() -> None:
     tuples = _load_optional_parquet(f"{processed_dir}/aligned_tuples.parquet")
     tuple_rows = (pd.DataFrame() if is_demo
                   else incident_tuples(tuples, selected))
+    video_summaries = _load_optional_parquet(f"{processed_dir}/video_summaries.parquet")
+    clip_summary = (None if is_demo else
+                    video_summary_for(video_summaries, incident.get("video_file")))
 
     events = build_timeline_events(incident, t0, t1, rel_offset=rel_offset,
                                    user_notes=_user_notes())
+    if clip_summary is not None:
+        # Real VLM/tags summary replaces the demo VIDEO bars (Phase 7).
+        events = [e for e in events if e.row != "VIDEO"] \
+            + vlm_video_events(clip_summary, t0, t1)
     if not tuple_rows.empty:
         # Real grounding replaces the demo SOP bars (Phase 6).
         grounded = grounded_sop_events(tuple_rows, rel_offset, t0, t1)
@@ -610,6 +619,16 @@ def main() -> None:
     video_col, sensor_col, evidence_col = st.columns([0.30, 0.38, 0.32], gap="small")
     with video_col, st.container(border=True, height=PANEL_HEIGHT):
         _render_video_panel(incident, state, events, tables.video_index, is_demo)
+        if clip_summary is not None:
+            mode_chip = ("" if clip_summary["mode"] == "vlm" else "demo")
+            st.markdown(
+                f'<span class="wb-chip {mode_chip}">'
+                f'{clip_summary["mode"].upper()} · {clip_summary["model"]} · '
+                f'conf {clip_summary["confidence"]:.2f}</span> '
+                + " ".join(f'<span class="wb-chip">{lab}</span>'
+                           for lab in clip_summary["labels"][:4]),
+                unsafe_allow_html=True)
+            st.caption(clip_summary["summary"])
         state = _state()  # transport may have mutated the shared clock
     grounded_sentences = grounded_explanation(tuple_rows) if not tuple_rows.empty else []
     with evidence_col, st.container(border=True, height=PANEL_HEIGHT):

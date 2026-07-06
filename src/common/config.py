@@ -202,6 +202,24 @@ class AssembleCfg(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Vision / VLM (Build Phase 7)
+# --------------------------------------------------------------------------- #
+class VisionCfg(BaseModel):
+    mode: str = "vlm"                    # vlm | tags_only (transparent fallback)
+    model_name: str = "Qwen/Qwen2.5-VL-3B-Instruct"   # D15: 3B fits 12 GB (D11)
+    device: str = "cuda"
+    n_frames: int = Field(default=8, gt=0)
+    max_new_tokens: int = Field(default=160, gt=0)
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_ok(cls, v: str) -> str:
+        if v not in {"vlm", "tags_only"}:
+            raise ValueError(f"vision.mode '{v}' not in vlm|tags_only")
+        return v
+
+
+# --------------------------------------------------------------------------- #
 # Retrieval index (Build Phase 5)
 # --------------------------------------------------------------------------- #
 class RetrievalIndexCfg(BaseModel):
@@ -262,6 +280,7 @@ class PipelineConfig(BaseModel):
     assemble: AssembleCfg = Field(default_factory=AssembleCfg)
     encoder: EncoderCfg = Field(default_factory=EncoderCfg)
     retrieval: RetrievalIndexCfg = Field(default_factory=RetrievalIndexCfg)
+    vision: VisionCfg = Field(default_factory=VisionCfg)
     runtime: RuntimeCfg = Field(default_factory=RuntimeCfg)
 
     # Populated by load_config(); the absolute repo root all relative paths resolve against.

@@ -143,6 +143,9 @@ encoder:
 retrieval:
   embedder: hashing            # smoke path: no model download; clearly named fallback
 
+vision:
+  mode: tags_only              # smoke path: real CSV tags, no VLM download
+
 runtime:
   log_level: WARNING
   log_format: text

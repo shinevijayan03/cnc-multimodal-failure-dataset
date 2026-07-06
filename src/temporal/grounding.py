@@ -54,13 +54,15 @@ def window_sensor_summary(row: pd.Series) -> str:
 
 def build_aligned_tuples(incident: pd.Series, feature_rows: pd.DataFrame,
                          retrieved: list, graph: EvidenceGraph,
-                         rel_offset: float = 0.0) -> list[AlignedTuple]:
+                         rel_offset: float = 0.0,
+                         clip_summary: str | None = None) -> list[AlignedTuple]:
     """Contract-valid tuples for one incident (spans stay incident-relative)."""
     video_file = incident.get("video_file")
     has_video = video_file is not None and pd.notna(video_file) and str(video_file)
-    clip_summary = (f"label-matched clip {video_file} (sync_provenance: "
-                    f"constructed, not measured)" if has_video
-                    else "no linked video")
+    if clip_summary is None:
+        clip_summary = (f"label-matched clip {video_file} (sync_provenance: "
+                        f"constructed, not measured)" if has_video
+                        else "no linked video")
     top = retrieved[0] if retrieved else None
     retrieved_text = (f"{top.citation}: " + " ".join(top.text.split())[:200]
                       if top else "no retrieved documentation")
@@ -91,6 +93,28 @@ def build_aligned_tuples(incident: pd.Series, feature_rows: pd.DataFrame,
     return tuples
 
 
+def _validate_videoclip(incident: pd.Series, feature_rows: pd.DataFrame,
+                        summary_row: pd.Series) -> None:
+    """Assert `contracts.core.VideoClip` conformance on a sample (Phase 7)."""
+    from contracts import VideoClip
+
+    t_start = float(feature_rows["t_start"].min())
+    t_end = float(feature_rows["t_end"].max())
+    fps = int(float(incident.get("video_fps") or 30.0) or 30)
+    VideoClip(
+        clip_id=str(summary_row["video_id"]),
+        incident_id=str(incident["incident_id"]),
+        t_start=t_start,
+        t_end=t_end,
+        fps=fps,
+        frame_range=(0, max(1, int((t_end - t_start) * fps))),
+        clip_uri=str(summary_row["video_file"]),
+        sync_provenance="constructed",
+        clip_summary=str(summary_row["summary"]),
+        visual_labels=[str(x) for x in json.loads(summary_row["visual_labels"])],
+    )
+
+
 def ground_corpus(cfg: PipelineConfig, limit: int | None = None,
                   write: bool = True, k: int = 3) -> dict:
     incidents = read_parquet(cfg.paths.incidents_index)
@@ -106,6 +130,14 @@ def ground_corpus(cfg: PipelineConfig, limit: int | None = None,
     retriever = IncidentRetriever(store, embedder,
                                   cfg.assemble.text_retrieval.failure_to_topics)
 
+    # Real VLM clip summaries (Phase 7), when built.
+    summaries_file = Path(cfg.paths.data_processed) / "video_summaries.parquet"
+    summaries = (read_parquet(summaries_file) if summaries_file.exists()
+                 else pd.DataFrame())
+    summary_by_file = ({str(r["video_file"]): r for _, r in summaries.iterrows()}
+                       if not summaries.empty else {})
+    videoclip_validated = 0
+
     rows = []
     n_tuples = 0
     n_ids = 0
@@ -116,7 +148,21 @@ def ground_corpus(cfg: PipelineConfig, limit: int | None = None,
         if feature_rows.empty:
             continue
         retrieved = retriever.retrieve(incident, feature_rows, k=k)
-        tuples = build_aligned_tuples(incident, feature_rows, retrieved, graph)
+        clip_summary = None
+        video_file = incident.get("video_file")
+        summary_row = (summary_by_file.get(str(video_file))
+                       if video_file is not None and pd.notna(video_file) else None)
+        if summary_row is not None:
+            labels = ", ".join(json.loads(summary_row["visual_labels"]) or [])
+            clip_summary = (f"{summary_row['mode'].upper()}"
+                            f"({summary_row['model']}): {summary_row['summary']}"
+                            f"{' [' + labels + ']' if labels else ''} "
+                            f"(sync_provenance: constructed)")
+            if videoclip_validated < 3:
+                _validate_videoclip(incident, feature_rows, summary_row)
+                videoclip_validated += 1
+        tuples = build_aligned_tuples(incident, feature_rows, retrieved, graph,
+                                      clip_summary=clip_summary)
         for t in tuples:
             n_tuples += 1
             n_ids += len(t.evidence_ids)
@@ -137,6 +183,8 @@ def ground_corpus(cfg: PipelineConfig, limit: int | None = None,
         write_parquet_atomic(frame, out)
 
     metrics = {
+        "videoclips_contract_validated": videoclip_validated,
+        "clips_with_vlm_summary": len(summary_by_file),
         "aligned_tuples": n_tuples,
         "evidence_ids_emitted": n_ids,
         "evidence_resolution_rate": 1.0 if n_tuples else 0.0,  # unresolvables raise
