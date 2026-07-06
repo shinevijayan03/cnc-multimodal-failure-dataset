@@ -119,10 +119,27 @@ def test_video_component_embeds_the_shared_clock_spec():
 
     state = PlaybackState(t0=0.0, t1=16.0, current_time_s=8.0, is_playing=True)
     spec = video_sync_spec(state, clip_duration_s=2.0)
-    html = _video_component_html("QUJD", spec)
-    assert "data:video/mp4;base64,QUJD" in html
+    html = _video_component_html("/app/static/video/vid_x.mp4", spec)
+    assert 'src="/app/static/video/vid_x.mp4"' in html
     payload = json.loads(html.split("const S = ", 1)[1].split(";\n", 1)[0])
     assert payload["t1"] == 16.0 and payload["playing"] is True
     assert payload["clip_rate"] == pytest.approx(0.125)
     assert payload["drive_mode"] == "rate"
     assert payload["current_s"] == 8.0
+
+
+def test_video_src_is_a_small_static_url_not_inline_base64():
+    """Inline base64 caused "Cached ForwardMsg MISS" (message-cache eviction
+    under fragment ticks); the component must reference a static URL."""
+    from src.ui.incident_explorer import repo_root
+    from streamlit_app import _video_src
+
+    videos = sorted((repo_root() / "data_pipeline" / "data_processed"
+                     / "video").glob("*.mp4"))
+    assert videos, "no processed clips available"
+    src = _video_src.__wrapped__(str(videos[0]))     # bypass st.cache_data
+    assert src == f"/app/static/video/{videos[0].name}"
+    copied = repo_root() / "static" / "video" / videos[0].name
+    assert copied.exists()
+    assert copied.stat().st_size == videos[0].stat().st_size
+    assert len(src) < 200                            # tiny ForwardMsg payload

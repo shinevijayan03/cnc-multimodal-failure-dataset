@@ -337,9 +337,25 @@ def _demo_video_path(video_index: pd.DataFrame):
 
 
 @st.cache_data(show_spinner=False)
-def _video_b64(path_str: str) -> str:
+def _video_src(path_str: str) -> str:
+    """Clip source for the video component: a static-file URL, tiny in the
+    ForwardMsg. Inline base64 (~190 KB) crossed Streamlit's message-cache
+    threshold and the fragment ticks evicted it mid-session ("Cached
+    ForwardMsg MISS"); the data URI remains only as a fallback when the
+    static folder is not writable."""
+    import shutil
     from pathlib import Path
-    return base64.b64encode(Path(path_str).read_bytes()).decode("ascii")
+    src = Path(path_str)
+    try:
+        static_dir = Path(__file__).resolve().parent / "static" / "video"
+        static_dir.mkdir(parents=True, exist_ok=True)
+        dest = static_dir / src.name
+        if not dest.exists() or dest.stat().st_size != src.stat().st_size:
+            shutil.copy2(src, dest)
+        return f"/app/static/video/{src.name}"
+    except OSError:
+        return ("data:video/mp4;base64,"
+                + base64.b64encode(src.read_bytes()).decode("ascii"))
 
 
 VIDEO_COMPONENT_HEIGHT = 296
@@ -353,7 +369,7 @@ _VIDEO_HTML = """
   <video id="wbv" muted playsinline preload="auto"
          style="width:100%;height:246px;object-fit:contain;background:#0f172a;
                 border-radius:8px;display:block;">
-    <source src="data:video/mp4;base64,__SRC__" type="video/mp4">
+    <source src="__SRC__" type="video/mp4">
   </video>
   <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
     <div style="flex:1;height:6px;background:#e5e7eb;border-radius:3px;">
@@ -420,9 +436,9 @@ _VIDEO_HTML = """
 """
 
 
-def _video_component_html(src_b64: str, spec) -> str:
+def _video_component_html(src_url: str, spec) -> str:
     return (_VIDEO_HTML
-            .replace("__SRC__", src_b64)
+            .replace("__SRC__", src_url)
             .replace("__SPEC__", json.dumps(asdict(spec))))
 
 
@@ -440,7 +456,7 @@ def _render_video_panel(incident: pd.Series, state: PlaybackState, events,
                          else _clip_duration(pd.Series(
                              {"video_file": video_index["video_file"].iloc[0]}), video_index))
         spec = video_sync_spec(state, clip_duration)
-        components.html(_video_component_html(_video_b64(str(video_path)), spec),
+        components.html(_video_component_html(_video_src(str(video_path)), spec),
                         height=VIDEO_COMPONENT_HEIGHT)
     chips = []
     for e in [ev for ev in events if ev.row == "VIDEO"]:

@@ -44,3 +44,6 @@ archive*/
 *.7z
 *.tar
 *.tar.gz
+
+# Static-serving copies of processed clips (created at runtime by the UI)
+static/

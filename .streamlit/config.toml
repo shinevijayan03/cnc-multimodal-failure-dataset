@@ -10,3 +10,14 @@ font = "sans serif"
 
 [server]
 headless = true
+# Serve incident clips as static files so the video component stays a small
+# ForwardMsg (inline base64 blew past the 10 KB cache threshold and the
+# 0.5 s fragment ticks aged the cached message out -> "Cached ForwardMsg
+# MISS" connection errors).
+enableStaticServing = true
+
+[global]
+# Belt-and-braces for the same bug: fragment reruns churn the run counter
+# that ages cached ForwardMsgs (default maxCachedMessageAge = 2), evicting
+# messages the client still references.
+maxCachedMessageAge = 300
