@@ -475,6 +475,19 @@ def quality_chip(quality_labels: dict[str, int], incident_id: str,
             "text": f"Run label: {'BAD' if label == 1 else 'good'} (recovered)"}
 
 
+def incident_bundle(bundles: pd.DataFrame, incident_id: str) -> pd.DataFrame:
+    """Ranked evidence-selection items (fusion v1, Build-A) for one incident."""
+    if bundles.empty or "incident_id" not in bundles.columns:
+        return pd.DataFrame()
+    rows = bundles[bundles["incident_id"] == incident_id].copy()
+    if rows.empty:
+        return rows
+    order = {"sensor": 0, "video": 1, "document": 2}
+    rows["_m"] = rows["modality"].map(order)
+    return (rows.sort_values(["_m", "rank"]).drop(columns=["_m"])
+            .reset_index(drop=True))
+
+
 def incident_tuples(tuples: pd.DataFrame, incident_id: str) -> pd.DataFrame:
     """Aligned tuples (Phase 6 grounding) for one incident."""
     if tuples.empty or "incident_id" not in tuples.columns:

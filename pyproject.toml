@@ -37,6 +37,7 @@ packages = [
     "src.encoder",
     "src.etl",
     "src.eval",
+    "src.fusion",
     "src.graph",
     "src.retrieval",
     "src.temporal",

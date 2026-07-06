@@ -117,6 +117,33 @@ def test_e2e_ui_helpers_render_grounded_output(grounded_workspace):
     assert not feature_rows.empty                       # sensor table populated
 
 
+def test_e2e_fusion_builds_bundles_and_contexts(grounded_workspace, monkeypatch):
+    """Build-A: evidence bundles + decoder contexts over the grounded workspace."""
+    cfg, _results = grounded_workspace
+    from src.fusion import select as fusion_mod
+    monkeypatch.setattr(fusion_mod, "append_run_record", lambda *_a, **_k: None)
+    summary = fusion_mod.build_bundles(cfg, write=True)
+    assert summary["incidents_bundled"] == 3
+    assert summary["resolution_rate"] == 1.0
+    assert summary["modality_counts"].get("sensor", 0) >= 3
+    assert summary["modality_counts"].get("document", 0) >= 3
+
+    processed = Path(cfg.paths.data_processed)
+    items = pd.read_parquet(processed / "evidence_bundles.parquet")
+    contexts = pd.read_parquet(processed / "decoder_contexts.parquet")
+    # Ranks are contiguous from 0 within each incident+modality.
+    for (_inc, _mod), group in items.groupby(["incident_id", "modality"]):
+        assert sorted(group["rank"]) == list(range(len(group)))
+    # Context is the decoder-ready block with all sections present.
+    ctx = str(contexts.iloc[0]["context_text"])
+    for section in ("INCIDENT", "SENSOR CHRONOLOGY", "VIDEO", "DOCUMENTS"):
+        assert section in ctx
+    # UI helper consumes the bundle frame.
+    from src.ui.workbench import incident_bundle
+    rows = incident_bundle(items, str(items["incident_id"].iloc[0]))
+    assert not rows.empty and rows.iloc[0]["modality"] == "sensor"
+
+
 def test_e2e_grounding_refuses_broken_graph(grounded_workspace, monkeypatch):
     """Deleting a node from the graph must make grounding fail loudly (I-2)."""
     cfg, _results = grounded_workspace

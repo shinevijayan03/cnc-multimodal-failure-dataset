@@ -147,11 +147,16 @@ def ground_corpus(cfg: PipelineConfig, limit: int | None = None,
         feature_rows = incident_feature_rows(features, inc_id, hvib)
         if feature_rows.empty:
             continue
-        retrieved = retriever.retrieve(incident, feature_rows, k=k)
         clip_summary = None
         video_file = incident.get("video_file")
         summary_row = (summary_by_file.get(str(video_file))
                        if video_file is not None and pd.notna(video_file) else None)
+        # B-9: the real VLM summary joins the retrieval query (sensor + video
+        # context), matching the architecture's retriever inputs.
+        retrieved = retriever.retrieve(
+            incident, feature_rows, k=k,
+            clip_summary=str(summary_row["summary"]) if summary_row is not None
+            else None)
         if summary_row is not None:
             labels = ", ".join(json.loads(summary_row["visual_labels"]) or [])
             clip_summary = (f"{summary_row['mode'].upper()}"

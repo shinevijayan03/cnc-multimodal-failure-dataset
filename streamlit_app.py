@@ -54,6 +54,7 @@ from src.ui.workbench import (
     grounded_sop_events,
     important_interval_events,
     incident_axis,
+    incident_bundle,
     incident_feature_rows,
     incident_tuples,
     live_readouts,
@@ -696,6 +697,25 @@ def main() -> None:
                         width="stretch")
 
     _timeline_live()
+
+    # ---- evidence selection (fusion v1, Build-A) ----
+    bundles = _load_optional_parquet(f"{processed_dir}/evidence_bundles.parquet")
+    contexts = _load_optional_parquet(f"{processed_dir}/decoder_contexts.parquet")
+    bundle_rows = (pd.DataFrame() if is_demo
+                   else incident_bundle(bundles, selected))
+    if not bundle_rows.empty:
+        with st.expander(f"Evidence selection · fusion v1 · "
+                         f"{len(bundle_rows)} ranked items (real scores; feeds "
+                         f"the Build-B decoder)"):
+            st.dataframe(
+                bundle_rows[["modality", "rank", "evidence_id", "score",
+                             "confidence", "label", "detail"]].round(4),
+                hide_index=True, width="stretch")
+            ctx = contexts[contexts["incident_id"] == selected] \
+                if not contexts.empty else pd.DataFrame()
+            if not ctx.empty:
+                st.markdown("**Decoder context (exact Build-B input):**")
+                st.code(str(ctx.iloc[0]["context_text"]), language="text")
 
     # ---- temporal grounding (real aligned tuples, Phase 6) ----
     if not tuple_rows.empty:
