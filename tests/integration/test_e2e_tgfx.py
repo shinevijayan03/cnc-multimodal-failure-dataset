@@ -144,6 +144,32 @@ def test_e2e_fusion_builds_bundles_and_contexts(grounded_workspace, monkeypatch)
     assert not rows.empty and rows.iloc[0]["modality"] == "sensor"
 
 
+def test_e2e_decoder_generates_grounded_explanations(grounded_workspace,
+                                                     monkeypatch):
+    """Build-B: mock decoder end-to-end — schema-valid, evidence-grounded."""
+    cfg, _results = grounded_workspace
+    from src.explain import generate as explain_mod
+    from src.fusion import select as fusion_mod
+    monkeypatch.setattr(fusion_mod, "append_run_record", lambda *_a, **_k: None)
+    monkeypatch.setattr(explain_mod, "append_run_record", lambda *_a, **_k: None)
+    fusion_mod.build_bundles(cfg, write=True)
+    summary = explain_mod.generate_corpus(cfg, provider_kind="mock", write=True)
+    assert summary["explanations_valid"] == 3
+    assert summary["schema_valid_rate"] == 1.0            # gate G1
+    assert summary["unsupported_claims_dropped"] == 0     # all evidence resolves
+
+    frame = pd.read_parquet(Path(cfg.paths.data_processed) / "explanations.parquet")
+    report = json.loads(frame.iloc[0]["report_json"])
+    assert report["failure_hypothesis"]
+    assert report["chronology"] and all(c["evidence_ids"]
+                                        for c in report["chronology"])
+    assert set(report["evidence"]) == {"sensor", "video", "documents"}
+    # Test split must be refused (I-4).
+    with pytest.raises(PermissionError):
+        explain_mod.generate_corpus(cfg, provider_kind="mock", split="test",
+                                    write=False)
+
+
 def test_e2e_grounding_refuses_broken_graph(grounded_workspace, monkeypatch):
     """Deleting a node from the graph must make grounding fail loudly (I-2)."""
     cfg, _results = grounded_workspace

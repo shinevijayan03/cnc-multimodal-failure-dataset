@@ -24,6 +24,7 @@ text = ["tiktoken>=0.5", "pypdf>=4.0", "python-docx>=1.1"]
 retrieval = ["rank-bm25>=0.2", "sentence-transformers>=2.4"]
 eval = ["matplotlib>=3.7"]
 encoder = ["torch>=2.2"]
+decoder = ["llama-cpp-python>=0.3"]
 dev = ["pytest>=7.4", "pytest-cov>=4.1"]
 
 [project.scripts]
@@ -37,6 +38,7 @@ packages = [
     "src.encoder",
     "src.etl",
     "src.eval",
+    "src.explain",
     "src.fusion",
     "src.graph",
     "src.retrieval",

@@ -475,6 +475,21 @@ def quality_chip(quality_labels: dict[str, int], incident_id: str,
             "text": f"Run label: {'BAD' if label == 1 else 'good'} (recovered)"}
 
 
+def incident_explanation(explanations: pd.DataFrame, incident_id: str) -> dict | None:
+    """Decoder output (Build-B) for one incident; real LLM preferred over mock."""
+    if explanations.empty or "incident_id" not in explanations.columns:
+        return None
+    rows = explanations[(explanations["incident_id"] == incident_id)
+                        & (explanations["valid"])]
+    if rows.empty:
+        return None
+    rows = rows.sort_values("mode", key=lambda s: s.map({"llm": 0, "mock": 1}))
+    row = rows.iloc[0]
+    report = json.loads(row["report_json"])
+    return {**report, "provider": str(row["provider"]),
+            "latency_s": float(row["latency_s"])}
+
+
 def incident_bundle(bundles: pd.DataFrame, incident_id: str) -> pd.DataFrame:
     """Ranked evidence-selection items (fusion v1, Build-A) for one incident."""
     if bundles.empty or "incident_id" not in bundles.columns:

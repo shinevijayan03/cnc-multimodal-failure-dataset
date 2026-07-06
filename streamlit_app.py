@@ -55,6 +55,7 @@ from src.ui.workbench import (
     important_interval_events,
     incident_axis,
     incident_bundle,
+    incident_explanation,
     incident_feature_rows,
     incident_tuples,
     live_readouts,
@@ -444,9 +445,37 @@ def _render_sop_cards(cards: list[dict]) -> None:
                 st.write(card["text"])
 
 
+def _render_decoder_report(report: dict) -> None:
+    mode_cls = "" if report["mode"] == "llm" else "demo"
+    mode_txt = ("REAL LLM (GBNF-constrained)" if report["mode"] == "llm"
+                else "MOCK template (deterministic baseline)")
+    st.markdown(
+        f'<span class="wb-chip {mode_cls}">{mode_txt} · {report["provider"]} · '
+        f'{report["latency_s"]:.1f}s</span>'
+        f'<span class="wb-chip">confidence {report["confidence"]}</span>',
+        unsafe_allow_html=True)
+    st.markdown(f"**Failure hypothesis:** {report['failure_hypothesis']}")
+    st.markdown("**Chronology:**")
+    for i, claim in enumerate(report["chronology"], start=1):
+        ids = ", ".join(claim["evidence_ids"])
+        st.markdown(f"{i}. [{claim['t_start']:+.1f}s → {claim['t_end']:+.1f}s] "
+                    f"{claim['claim']}  \n"
+                    f"&nbsp;&nbsp;&nbsp;evidence: `{ids}`")
+    if report["sop_links"]:
+        st.markdown("**SOP linkage:** " + " · ".join(report["sop_links"]))
+    st.markdown("**Corrective actions:** "
+                + "; ".join(report["corrective_actions"]))
+    if report["uncertainties"]:
+        st.caption("Uncertainties: " + "; ".join(report["uncertainties"]))
+    if report["unsupported_claims"]:
+        st.warning("Guardrails dropped unsupported claims (I-2):\n\n- "
+                   + "\n- ".join(report["unsupported_claims"]))
+
+
 def _render_evidence_panel(incident: pd.Series, linked_cards: list[dict],
                            events, state: PlaybackState, retrieval,
-                           grounded_sentences: list[dict]) -> None:
+                           grounded_sentences: list[dict],
+                           decoder_report: dict | None = None) -> None:
     _panel_head("SOP EVIDENCE &", "EXPLANATION")
     sop_tab, ai_tab, claims_tab = st.tabs(["SOP Evidence", "AI Explanation",
                                            "Claim Verification"])
@@ -471,6 +500,9 @@ def _render_evidence_panel(incident: pd.Series, linked_cards: list[dict],
             with st.expander("Chunks linked at dataset build (keyword-topic)"):
                 _render_sop_cards(linked_cards)
     with ai_tab:
+        if decoder_report is not None:
+            _render_decoder_report(decoder_report)
+            st.divider()
         if grounded_sentences:
             st.markdown("**Grounded sensor chronology (real, per sub-window):**")
             for sentence in grounded_sentences:
@@ -632,9 +664,12 @@ def main() -> None:
             st.caption(clip_summary["summary"])
         state = _state()  # transport may have mutated the shared clock
     grounded_sentences = grounded_explanation(tuple_rows) if not tuple_rows.empty else []
+    explanations = _load_optional_parquet(f"{processed_dir}/explanations.parquet")
+    decoder_report = (None if is_demo
+                      else incident_explanation(explanations, selected))
     with evidence_col, st.container(border=True, height=PANEL_HEIGHT):
         _render_evidence_panel(incident, cards, events, state, retrieval,
-                               grounded_sentences)
+                               grounded_sentences, decoder_report)
     with sensor_col, st.container(border=True, height=PANEL_HEIGHT):
         channels = list(display["channel"].unique())
         default = [c for c in ("Vib RMS", "Pressure Var", "Temp Delta") if c in channels] \
