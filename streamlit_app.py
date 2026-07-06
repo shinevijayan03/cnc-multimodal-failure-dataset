@@ -5,19 +5,26 @@ Zones (reference screenshots, 2026-07-03):
   wide     — TEMPORAL ALIGNMENT TIMELINE with Play-through / Stop / Export
   details  — incident metadata chips, alignment summary, raw row (preserved)
 
-One unified 0-based incident time axis drives everything: the video transport
-readout, the sensor chart cursor, the live readouts, and the timeline cursor
-all show the same shared clock (st.session_state, ticked by st.fragment).
+One unified 0-based incident time axis drives everything: the video element,
+the sensor chart cursor, the live readouts, and the timeline cursor all follow
+the same shared clock (st.session_state, ticked by st.fragment). The video is
+an HTML5 component driven proportionally against the global clock (constructed
+sync, I-8), so play-through always reaches the final timeline tick — never the
+clip's native duration. Clicking a timeline evidence bar seeks every view.
 A DEMO simulated incident reproduces the reference scenario exactly.
 """
 
 from __future__ import annotations
 
+import base64
+import json
 import time
+from dataclasses import asdict
 
 import altair as alt
 import pandas as pd
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.ui.incident_explorer import (
     DEFAULT_PROCESSED_DIR,
@@ -61,9 +68,10 @@ from src.ui.workbench import (
     live_readouts,
     live_retrieval_cards,
     quality_chip,
+    evidence_jump_options,
     rolling_rms_frame,
-    video_offset_for,
     video_summary_for,
+    video_sync_spec,
     vlm_video_events,
 )
 
@@ -225,6 +233,8 @@ def _init_playback(incident_id: str, t0: float, t1: float) -> None:
         st.session_state.wb_last_tick = time.monotonic()
         st.session_state.pop("wb_slider", None)
         st.session_state.pop("wb_jump", None)
+        st.session_state.pop("wb_jump_pills", None)
+        st.session_state.pop("wb_jump_prev", None)
     st.session_state.setdefault("wb_notes", {})
     st.session_state.wb_t0, st.session_state.wb_t1 = t0, t1
 
@@ -282,6 +292,32 @@ def _user_notes() -> list[dict]:
     return st.session_state.wb_notes.get(st.session_state.get("wb_incident", ""), [])
 
 
+def _on_jump() -> None:
+    """Evidence-marker click → seek EVERY view (video, sensor, timeline).
+
+    The pills run in multi-select mode (single-select pills break Streamlit's
+    AppTest serializer when nothing is selected); the callback reduces the
+    selection to the newest pick so it behaves as single-select.
+    """
+    picked = list(st.session_state.get("wb_jump_pills") or [])
+    previous = list(st.session_state.get("wb_jump_prev") or [])
+    fresh = [p for p in picked if p not in previous] or picked
+    if not fresh:
+        st.session_state.wb_jump_prev = []
+        return
+    target = fresh[-1]
+    st.session_state.wb_jump_pills = [target]
+    st.session_state.wb_jump_prev = [target]
+    info = st.session_state.get("wb_jump_map", {}).get(target)
+    if not info:
+        return
+    state = _state()
+    state.seek(info["t"])
+    state.stop()
+    _store(state)
+    st.session_state.wb_selected = info["event_id"]
+
+
 # --------------------------------------------------------------------------- #
 # Video panel (R4)
 # --------------------------------------------------------------------------- #
@@ -300,6 +336,96 @@ def _demo_video_path(video_index: pd.DataFrame):
     return video_path_for_display(pseudo, repo_root())
 
 
+@st.cache_data(show_spinner=False)
+def _video_b64(path_str: str) -> str:
+    from pathlib import Path
+    return base64.b64encode(Path(path_str).read_bytes()).decode("ascii")
+
+
+VIDEO_COMPONENT_HEIGHT = 296
+
+# The clip follows the GLOBAL incident clock: its own timeline is stretched
+# proportionally over [t0, t1] (constructed sync, I-8). JS mirrors the tested
+# video_sync_spec() formula, preferring the element's real duration; "rate"
+# mode plays natively at clip_rate, otherwise a timer scrubs currentTime.
+_VIDEO_HTML = """
+<div style="font-family:ui-monospace,monospace;">
+  <video id="wbv" muted playsinline preload="auto"
+         style="width:100%;height:246px;object-fit:contain;background:#0f172a;
+                border-radius:8px;display:block;">
+    <source src="data:video/mp4;base64,__SRC__" type="video/mp4">
+  </video>
+  <div style="display:flex;align-items:center;gap:8px;margin-top:6px;">
+    <div style="flex:1;height:6px;background:#e5e7eb;border-radius:3px;">
+      <div id="wbv-bar" style="height:100%;width:0%;background:#0891b2;
+           border-radius:3px;"></div>
+    </div>
+    <span id="wbv-clock" style="font-size:12px;font-weight:600;color:#0e7490;
+          white-space:nowrap;">--</span>
+  </div>
+</div>
+<script>
+(function() {
+  const S = __SPEC__;
+  const v = document.getElementById("wbv");
+  const bar = document.getElementById("wbv-bar");
+  const clock = document.getElementById("wbv-clock");
+  const span = Math.max(S.t1 - S.t0, 1e-9);
+  const renderStart = performance.now();
+
+  function globalT() {
+    if (!S.playing) return S.current_s;
+    return Math.min(S.current_s +
+      (performance.now() - renderStart) / 1000 * S.transport_rate, S.t1);
+  }
+  function clipDuration() {
+    return (isFinite(v.duration) && v.duration > 0) ? v.duration
+                                                    : S.clip_duration_s;
+  }
+  function clipTarget(g) {
+    const frac = Math.min(Math.max((g - S.t0) / span, 0), 1);
+    return Math.min(frac * clipDuration(),
+                    Math.max(clipDuration() - 0.05, 0));
+  }
+  function paint(g) {
+    const frac = Math.min(Math.max((g - S.t0) / span, 0), 1);
+    bar.style.width = (frac * 100).toFixed(2) + "%";
+    clock.textContent = "GLOBAL " + g.toFixed(1) + "s / " + S.t1.toFixed(0) + "s";
+  }
+
+  v.addEventListener("loadedmetadata", function() {
+    v.currentTime = clipTarget(S.current_s);
+    paint(globalT());
+    if (!S.playing) return;
+    const dur = clipDuration();
+    const clipRate = dur / span * S.transport_rate;
+    const rateMode = clipRate >= 0.0625 && clipRate <= 16;
+    if (rateMode) {
+      v.playbackRate = clipRate;
+      v.play().catch(function() {});
+    }
+    const timer = setInterval(function() {
+      const g = globalT();
+      paint(g);
+      const target = clipTarget(g);
+      // seek mode scrubs; rate mode only corrects visible drift.
+      if (!rateMode || Math.abs(v.currentTime - target) > 0.3) {
+        v.currentTime = target;
+      }
+      if (g >= S.t1) { v.pause(); clearInterval(timer); }
+    }, 100);
+  });
+})();
+</script>
+"""
+
+
+def _video_component_html(src_b64: str, spec) -> str:
+    return (_VIDEO_HTML
+            .replace("__SRC__", src_b64)
+            .replace("__SPEC__", json.dumps(asdict(spec))))
+
+
 def _render_video_panel(incident: pd.Series, state: PlaybackState, events,
                         video_index: pd.DataFrame, is_demo: bool) -> None:
     _panel_head("MACHINE", "VIDEO STREAM",
@@ -313,9 +439,9 @@ def _render_video_panel(incident: pd.Series, state: PlaybackState, events,
         clip_duration = (_clip_duration(incident, video_index) if not is_demo
                          else _clip_duration(pd.Series(
                              {"video_file": video_index["video_file"].iloc[0]}), video_index))
-        offset = video_offset_for(state, clip_duration)
-        st.video(str(video_path), start_time=int(offset),
-                 autoplay=state.is_playing, muted=True)
+        spec = video_sync_spec(state, clip_duration)
+        components.html(_video_component_html(_video_b64(str(video_path)), spec),
+                        height=VIDEO_COMPONENT_HEIGHT)
     chips = []
     for e in [ev for ev in events if ev.row == "VIDEO"]:
         cls = ""
@@ -336,8 +462,10 @@ def _render_video_panel(incident: pd.Series, state: PlaybackState, events,
     with fwd:
         st.button("↠", on_click=_on_step, args=(1.0,), help="Step forward 1 s")
     with slider_col:
-        if "wb_slider" not in st.session_state:
-            st.session_state.wb_slider = state.current_time_s
+        # Keep the transport slider synced to the shared clock on every full
+        # rerun (fragment ticks advance the clock without re-instantiating it).
+        st.session_state.wb_slider = float(min(max(state.current_time_s,
+                                                   state.t0), state.t1))
         st.slider("cursor", min_value=state.t0, max_value=state.t1, step=0.1,
                   key="wb_slider", on_change=_on_scrub, label_visibility="collapsed")
     with timec:
@@ -532,6 +660,7 @@ def _timeline_chart(frame: pd.DataFrame, state: PlaybackState) -> alt.LayerChart
     y = alt.Y("row:N", sort=list(TIMELINE_ROWS), title=None,
               axis=alt.Axis(labelColor="#374151", labelFontWeight="bold",
                             labelFontSize=11, ticks=False, domain=False))
+    selected = state.selected_event_id or "__none__"
     bars = alt.Chart(frame).mark_bar(cornerRadius=3, height=18,
                                      stroke=None).encode(
         y=y,
@@ -547,6 +676,8 @@ def _timeline_chart(frame: pd.DataFrame, state: PlaybackState) -> alt.LayerChart
                                          filled=False, strokeWidth=1.4).encode(
         y=y, x=alt.X("t_start:Q", scale=x_scale), x2="t_end:Q",
         stroke=alt.Color("color:N", scale=None),
+        strokeWidth=alt.condition(f"datum.event_id === '{selected}'",
+                                  alt.value(2.8), alt.value(1.4)),
         opacity=alt.condition(alt.datum.active, alt.value(1.0), alt.value(0.6)),
     )
     labels = alt.Chart(frame).mark_text(
@@ -688,6 +819,11 @@ def main() -> None:
                 live.tick(now - st.session_state.wb_last_tick)
                 st.session_state.wb_last_tick = now
                 _store(live)
+                if not live.is_playing:
+                    # Play-through reached the final tick: settle the whole
+                    # page (transport buttons, video element) into stopped
+                    # state at t1 so every view agrees.
+                    st.rerun(scope="app")
             if subset.empty:
                 st.info("Select at least one channel.")
                 return
@@ -725,11 +861,21 @@ def main() -> None:
                            file_name=f"{selected}_evidence_report.json",
                            mime="application/json", width="stretch")
 
+    jump_options = evidence_jump_options(events)
+    if jump_options:
+        jump_map = {o["event_id"]: o for o in jump_options}
+        st.session_state.wb_jump_map = jump_map
+        st.pills("Jump to evidence",
+                 options=list(jump_map),
+                 format_func=lambda i, m=jump_map: m[i]["display"],
+                 key="wb_jump_pills", on_change=_on_jump,
+                 selection_mode="multi", label_visibility="collapsed")
+
     @st.fragment(run_every=TICK_SECONDS)
     def _timeline_live() -> None:
         live = _state()
-        st.altair_chart(_timeline_chart(events_frame(events, live.current_time_s), live),
-                        width="stretch")
+        st.altair_chart(_timeline_chart(events_frame(events, live.current_time_s),
+                                        live), width="stretch")
 
     _timeline_live()
 

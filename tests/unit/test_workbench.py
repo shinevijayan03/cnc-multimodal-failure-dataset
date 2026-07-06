@@ -25,9 +25,11 @@ from src.ui.workbench import (
     export_report_json,
     incident_axis,
     live_readouts,
+    evidence_jump_options,
     rolling_rms_frame,
     sensor_events,
     video_offset_for,
+    video_sync_spec,
 )
 
 
@@ -142,6 +144,68 @@ def test_video_offset_tracks_shared_time_proportionally():
     state.seek(T1)
     assert video_offset_for(state, clip_duration_s=8.0) == pytest.approx(8.0)
     assert video_offset_for(PlaybackState(), 8.0) == 0.0
+
+
+def test_video_sync_spec_plays_natively_when_browser_supports_rate():
+    # 2 s clip over a 16 s incident -> playbackRate 0.125 (>= 0.0625 floor).
+    state = PlaybackState(t0=T0, t1=T1, current_time_s=8.0, is_playing=True)
+    spec = video_sync_spec(state, clip_duration_s=2.0)
+    assert spec.drive_mode == "rate"
+    assert spec.clip_rate == pytest.approx(0.125)
+    assert spec.clip_offset_s == pytest.approx(1.0)       # halfway -> mid-clip
+    assert spec.playing and spec.t1 == T1
+
+
+def test_video_sync_spec_transport_rate_scales_clip_rate():
+    state = PlaybackState(t0=T0, t1=T1, current_time_s=0.0, is_playing=True,
+                          playback_rate=2.0)
+    assert video_sync_spec(state, 2.0).clip_rate == pytest.approx(0.25)
+
+
+def test_video_sync_spec_falls_back_to_seek_for_extreme_ratio():
+    # 2 s clip over 200 s incident -> 0.01, below the browser floor.
+    state = PlaybackState(t0=0.0, t1=200.0, current_time_s=0.0, is_playing=True)
+    assert video_sync_spec(state, 2.0).drive_mode == "seek"
+
+
+def test_video_sync_spec_clip_ends_exactly_at_final_tick():
+    # Target behavior 3: at t1 the clip is at ITS end, not stranded earlier.
+    state = PlaybackState(t0=T0, t1=T1, current_time_s=T1)
+    spec = video_sync_spec(state, clip_duration_s=2.0)
+    assert spec.clip_offset_s == pytest.approx(2.0)
+    assert spec.current_s == T1
+
+
+def test_video_sync_spec_degenerate_durations_never_play():
+    playing = PlaybackState(t0=T0, t1=T1, current_time_s=1.0, is_playing=True)
+    for clip in (0.0, -1.0):
+        spec = video_sync_spec(playing, clip)
+        assert not spec.playing and spec.clip_rate == 0.0
+        assert spec.clip_offset_s == 0.0
+    zero_axis = PlaybackState(t0=5.0, t1=5.0, current_time_s=5.0, is_playing=True)
+    assert not video_sync_spec(zero_axis, 2.0).playing
+
+
+def test_evidence_jump_options_cover_bars_chronologically(incident):
+    events = build_timeline_events(incident, T0, T1, rel_offset=REL)
+    options = evidence_jump_options(events)
+    assert options, "evidence bars must yield jump markers"
+    times = [o["t"] for o in options]
+    assert times == sorted(times)                        # chronological
+    ids = {o["event_id"] for o in options}
+    assert len(ids) == len(options)                      # unique click targets
+    # Baseline filler bars are not click targets.
+    labels = {e.event_id: e.label for e in events}
+    assert all(labels[o["event_id"]].strip().lower()
+               not in {"baseline normal", "normal"} for o in options)
+    # The real evidence span (6..9.5 on the axis) is jumpable.
+    assert any(o["t"] == 6.0 for o in options)
+    # Display text carries the seek time.
+    assert all(f"{o['t']:.0f}s" in o["display"] for o in options)
+
+
+def test_evidence_jump_options_empty_events():
+    assert evidence_jump_options([]) == []
 
 
 def test_cursor_active_flags_in_events_frame(incident):

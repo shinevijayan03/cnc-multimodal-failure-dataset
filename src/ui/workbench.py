@@ -103,6 +103,75 @@ def video_offset_for(state: PlaybackState, clip_duration_s: float) -> float:
     return min(max(frac, 0.0), 1.0) * clip_duration_s
 
 
+# HTML5 media elements clamp playbackRate outside this range (Chromium).
+MIN_BROWSER_RATE = 0.0625
+MAX_BROWSER_RATE = 16.0
+
+
+@dataclass(frozen=True)
+class VideoSyncSpec:
+    """Everything the video element needs to follow the shared incident clock.
+
+    The clip spans the WHOLE incident axis proportionally (constructed sync,
+    I-8), so during play-through the clip must finish exactly when the shared
+    clock reaches t1 — never at its native duration. ``drive_mode`` picks how:
+
+    * ``rate`` — play natively at ``clip_rate`` (= clip_duration / incident
+      duration x transport rate); smooth, used when browsers honor the rate.
+    * ``seek`` — the ratio is outside the browser-supported playbackRate
+      range; a timer scrubs ``currentTime`` proportionally instead.
+    """
+
+    clip_offset_s: float
+    clip_duration_s: float
+    clip_rate: float
+    drive_mode: str            # "rate" | "seek"
+    playing: bool
+    t0: float
+    t1: float
+    current_s: float
+    transport_rate: float
+
+
+def video_sync_spec(state: PlaybackState, clip_duration_s: float) -> VideoSyncSpec:
+    """Derive the clip drive parameters from the shared clock (pure)."""
+    duration = state.duration_s
+    usable = duration > 0 and clip_duration_s > 0
+    clip_rate = (clip_duration_s / duration) * state.playback_rate if usable else 0.0
+    drive_mode = ("rate" if MIN_BROWSER_RATE <= clip_rate <= MAX_BROWSER_RATE
+                  else "seek")
+    return VideoSyncSpec(
+        clip_offset_s=video_offset_for(state, clip_duration_s),
+        clip_duration_s=max(clip_duration_s, 0.0),
+        clip_rate=clip_rate,
+        drive_mode=drive_mode,
+        playing=bool(state.is_playing and usable),
+        t0=state.t0, t1=state.t1,
+        current_s=min(max(state.current_time_s, state.t0), state.t1),
+        transport_rate=state.playback_rate,
+    )
+
+
+_JUMP_SKIP_LABELS = {"baseline normal", "normal"}
+
+
+def evidence_jump_options(events: list["TimelineEvent"]) -> list[dict]:
+    """Clickable evidence markers for the timeline, chronological.
+
+    One marker per evidence bar (baseline/normal filler bars are skipped).
+    Clicking a marker seeks the SHARED clock, so the video, sensor chart, and
+    timeline cursor all move together (Streamlit cannot attach selections to
+    layered Altair charts, so the markers are the click surface for the bars).
+    """
+    options = []
+    for e in sorted(events, key=lambda e: (e.t_start, e.row, e.event_id)):
+        if e.label.strip().lower() in _JUMP_SKIP_LABELS:
+            continue
+        options.append({"event_id": e.event_id, "t": float(e.t_start),
+                        "display": f"{e.t_start:.0f}s · {e.label}"})
+    return options
+
+
 # --------------------------------------------------------------------------- #
 # Unified incident time axis
 # --------------------------------------------------------------------------- #
