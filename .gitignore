@@ -1,9 +1,21 @@
 # --- Raw + processed data (large / licensed; never committed) ---
+# Generated sample data (scripts/generate_sample_data.py) is recreatable.
+data_pipeline/data_raw_sample/
+data_pipeline/data_processed_sample/
 data_raw/**
 !data_raw/**/.gitkeep
 data_processed/**
 !data_processed/**/.gitkeep
+data_pipeline/data_raw/**
+!data_pipeline/data_raw/**/.gitkeep
+data_pipeline/data_processed/**
+!data_pipeline/data_processed/**/.gitkeep
+data_pipeline/logs/**
+!data_pipeline/logs/**/.gitkeep
 logs/
+
+# --- Model checkpoints (recreatable from seeded training) ---
+models/
 
 # --- Python ---
 __pycache__/
@@ -24,6 +36,7 @@ htmlcov/
 Thumbs.db
 .vscode/
 .idea/
+.claude/settings.local.json
 
 # --- Local archives / large blobs (never committed) ---
 archive*/
@@ -31,3 +44,6 @@ archive*/
 *.7z
 *.tar
 *.tar.gz
+
+# Static-serving copies of processed clips (created at runtime by the UI)
+static/

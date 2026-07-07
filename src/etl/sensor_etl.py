@@ -26,6 +26,7 @@ from ..common.config import (
 )
 from ..common.errors import ReaderError
 from ..common.ids import incident_id
+from ..features.vibration import sliding_rms
 from ..common.io_utils import exists_and_fresh, rows_to_df, write_parquet_atomic
 from ..common.logging_utils import RunSummary, get_logger
 from ..common.schemas import FailureFamily, SensorWindowRow, Span
@@ -244,20 +245,26 @@ class EventDetector:
         return x - float(np.mean(x))  # remove DC / mounting offset before RMS
 
     def _sliding_rms(self, x: np.ndarray, fs: float) -> tuple[np.ndarray, np.ndarray]:
-        win = max(1, int(round(self.cfg.window_s * fs)))
-        hop = max(1, int(round(self.cfg.hop_s * fs)))
-        if x.size < win:
-            return np.empty(0), np.empty(0)
-        x2 = x.astype("float64") ** 2
-        csum = np.concatenate([[0.0], np.cumsum(x2)])
-        starts = np.arange(0, x.size - win + 1, hop)
-        rms = np.sqrt((csum[starts + win] - csum[starts]) / win)
-        centers = (starts + win // 2) / fs
-        return rms, centers
+        # Feature math lives on the one feature path (I-3); the implementation
+        # moved verbatim to src/features/vibration.py in Build Phase 3.
+        return sliding_rms(x, fs, self.cfg.window_s, self.cfg.hop_s)
 
     def detect(self, df: pd.DataFrame, fs_hz: float, cfg: EventDetectionCfg | None = None
                ) -> list[Event]:
         cfg = cfg or self.cfg
+        if cfg.method == "segment_center":
+            t = df["time_s"].to_numpy()
+            if t.size == 0:
+                return []
+            t_start = float(t[0])
+            t_end = float(t[-1])
+            return [Event(
+                t_event_s=(t_start + t_end) / 2.0,
+                t_start_s=t_start,
+                t_end_s=t_end,
+                score=1.0,
+            )]
+
         x = self._energy_channel(df)
         rms, centers = self._sliding_rms(x, fs_hz)
         if rms.size == 0:
@@ -412,6 +419,13 @@ class SensorETL:
         self.carver = WindowCarver()
         self.spanner = EvidenceSpanExtractor(s.evidence_spans)
 
+    def _repo_relative(self, path: Path) -> str:
+        root = Path(self.cfg.repo_root) if self.cfg.repo_root else Path.cwd()
+        try:
+            return path.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            return str(path)
+
     def run(self, limit: int | None = None, dry_run: bool | None = None) -> RunSummary:
         dry_run = self.cfg.runtime.dry_run if dry_run is None else dry_run
         summ = RunSummary(stage="sensor", dry_run=dry_run)
@@ -490,8 +504,8 @@ class SensorETL:
                 continue
             spans = self.spanner.extract(window, ev, s.evidence_spans)
             inc_id = incident_id(dscfg.name, run.run_id, ev.t_event_s)
-            rel_file = f"{Path(self.cfg.paths.sensor_windows_dir).name}/{inc_id}.parquet"
-            sensor_file = (Path(self.cfg.paths.data_processed).name + "/" + rel_file)
+            out_path = windows_dir / f"{inc_id}.parquet"
+            sensor_file = self._repo_relative(out_path)
             row = SensorWindowRow(
                 incident_id=inc_id,
                 source_dataset=dscfg.name,
@@ -507,7 +521,6 @@ class SensorETL:
             )
             rows.append(row)
             if not dry_run:
-                out_path = windows_dir / f"{inc_id}.parquet"
                 src = Path(run.meta.get("source_file", "")) if run.meta.get("source_file") else None
                 if src and exists_and_fresh(out_path, src):
                     summ.bump("skipped")  # idempotent: already built from same source

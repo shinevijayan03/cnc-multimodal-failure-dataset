@@ -1,0 +1,49 @@
+flowchart TB
+    subgraph "Inputs"
+        sraw["Sensor CSV/H5 files"]
+        traw["Manuals: md/txt/docx/pdf"]
+        vraw["Raw MP4 clips"]
+        tags["video_tags.csv"]
+        yaml["dataset.yaml"]
+    end
+
+    subgraph "Processing"
+        snorm["Normalize channels and time"]
+        fs["Estimate or apply fs_hz"]
+        detect["Detect RMS threshold events"]
+        carve["Carve incident windows"]
+        readtxt["Read plain text"]
+        chunk["Chunk and topic-tag text"]
+        probe["Probe/normalize video"]
+        merge["Merge video tags"]
+        link["Assemble heuristic links"]
+        metrics["Compute dataset metrics"]
+    end
+
+    subgraph "Outputs"
+        swfiles["sensor_windows/*.parquet"]
+        swindex["sensor_windows.parquet"]
+        chunks["text_chunks.parquet"]
+        vids["video/*.mp4"]
+        vidindex["video_index.parquet"]
+        incidents["incidents.parquet"]
+        report["eval_report.json/md"]
+    end
+
+    yaml --> snorm
+    yaml --> chunk
+    yaml --> probe
+    yaml --> link
+    sraw --> snorm --> fs --> detect --> carve
+    carve --> swfiles
+    carve --> swindex
+    traw --> readtxt --> chunk --> chunks
+    vraw --> probe --> vids
+    tags --> merge
+    probe --> merge --> vidindex
+    swindex --> link
+    swfiles --> link
+    chunks --> link
+    vidindex --> link
+    link --> incidents
+    incidents --> metrics --> report

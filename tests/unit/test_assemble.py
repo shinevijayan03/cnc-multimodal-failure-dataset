@@ -13,8 +13,6 @@ from src.common.schemas import (
     IncidentRow,
     Regime,
     Severity,
-    Span,
-    Split,
 )
 from src.etl.assemble_incidents import LabelDeriver, SplitAssigner, TextRetriever, VideoMatcher
 from tests.conftest import make_chunks, make_video_index
@@ -34,6 +32,20 @@ def test_label_defaults():  # UT-ASM-02
     assert labels["regime_label"] is Regime.unknown
     assert labels["severity_label"].value == "unknown"
     assert labels["root_cause_label"] == "unknown"
+
+
+def test_weak_failure_labels_from_amplitude_quantiles():
+    d = LabelDeriver(amp_lo=10.0, amp_hi=20.0)
+    assert d.failure_family(5.0) is FailureFamily.tool_wear
+    assert d.failure_family(15.0) is FailureFamily.spindle_fault
+    assert d.failure_family(25.0) is FailureFamily.chatter
+    assert d.derive(amplitude=25.0)["root_cause_label"] == "weak_signal_chatter"
+
+
+def test_weak_id_bucket_labels_are_deterministic():
+    d = LabelDeriver()
+    assert d.weak_failure_family("inc_123") is d.weak_failure_family("inc_123")
+    assert d.weak_severity("inc_123") is d.weak_severity("inc_123")
 
 
 # --------------------------------------------------------------------------- VideoMatcher

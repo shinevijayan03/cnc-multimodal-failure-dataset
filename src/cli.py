@@ -20,7 +20,6 @@ import typer
 
 from .common.config import load_config
 from .common.errors import AssemblyError, ConfigError, PipelineError
-from .common.logging_utils import get_logger
 from .etl.assemble_incidents import IncidentAssembler
 from .etl.sensor_etl import SensorETL
 from .etl.text_etl import TextETL
@@ -85,7 +84,6 @@ def assemble(config: str = ConfigOpt, limit: Optional[int] = LimitOpt, dry_run: 
 def run_all(config: str = ConfigOpt, limit: Optional[int] = LimitOpt, dry_run: bool = DryRunOpt):
     """Run sensor -> text -> video -> assemble in order."""
     cfg = _load(config)
-    log = get_logger("cli", cfg.runtime.log_level, cfg.runtime.log_format)
     for name, stage in (("sensor", SensorETL(cfg)), ("text", TextETL(cfg)),
                         ("video", VideoETL(cfg))):
         summ = stage.run(limit=limit, dry_run=dry_run)

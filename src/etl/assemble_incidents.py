@@ -20,6 +20,7 @@ from ..common.config import (
     VideoMatchCfg,
 )
 from ..common.errors import AssemblyError
+from ..common.ids import stable_hash
 from ..common.io_utils import load_json_col, read_parquet, rows_to_df, write_parquet_atomic
 from ..common.logging_utils import RunSummary, get_logger
 from ..common.schemas import (
@@ -39,7 +40,7 @@ from ..common.schemas import (
 # LabelDeriver
 # --------------------------------------------------------------------------- #
 class LabelDeriver:
-    """Derive regime/phase/severity/root_cause; severity from amplitude quantiles."""
+    """Derive weak labels; severity and fallback failure from amplitude quantiles."""
 
     def __init__(self, amp_lo: float | None = None, amp_hi: float | None = None,
                  default_label: str = "unknown"):
@@ -57,6 +58,29 @@ class LabelDeriver:
             return Severity.med
         return Severity.high
 
+    def failure_family(self, amplitude: float | None) -> FailureFamily:
+        severity = self.severity(amplitude)
+        if severity is Severity.low:
+            return FailureFamily.tool_wear
+        if severity is Severity.med:
+            return FailureFamily.spindle_fault
+        if severity is Severity.high:
+            return FailureFamily.chatter
+        return FailureFamily.unknown
+
+    def weak_bucket(self, key: str) -> int:
+        return int(stable_hash(key), 16) % 3
+
+    def weak_failure_family(self, key: str) -> FailureFamily:
+        return (
+            FailureFamily.tool_wear,
+            FailureFamily.spindle_fault,
+            FailureFamily.chatter,
+        )[self.weak_bucket(key)]
+
+    def weak_severity(self, key: str) -> Severity:
+        return (Severity.low, Severity.med, Severity.high)[self.weak_bucket(key)]
+
     def derive(self, meta: dict | None = None, amplitude: float | None = None) -> dict:
         meta = meta or {}
         regime = meta.get("regime", self.default)
@@ -64,11 +88,16 @@ class LabelDeriver:
             regime_enum = Regime(str(regime).lower())
         except ValueError:
             regime_enum = Regime.unknown
+        failure = self.failure_family(amplitude)
+        root_cause = meta.get("root_cause")
+        if root_cause is None and failure is not FailureFamily.unknown:
+            root_cause = f"weak_signal_{failure.value}"
         return {
             "regime_label": regime_enum,
             "phase_label": str(meta.get("phase", self.default)),
             "severity_label": self.severity(amplitude),
-            "root_cause_label": str(meta.get("root_cause", self.default)),
+            "failure_family": failure,
+            "root_cause_label": str(root_cause or self.default),
         }
 
 
@@ -126,6 +155,7 @@ class TextRetriever:
         self.cfg = cfg
         self.failure_to_topics = failure_to_topics
         self.chunks = chunks if chunks is not None else pd.DataFrame()
+        self._cache: dict[tuple[str, str, int, int], list[str]] = {}
         if not self.chunks.empty and "topic_tags" in self.chunks.columns:
             self._tags = [set(load_json_col(t)) for t in self.chunks["topic_tags"]]
         else:
@@ -133,6 +163,9 @@ class TextRetriever:
 
     def retrieve(self, failure: FailureFamily, doc_type: DocType,
                  k_min: int, k_max: int) -> list[str]:
+        cache_key = (failure.value, doc_type.value, k_min, k_max)
+        if cache_key in self._cache:
+            return list(self._cache[cache_key])
         if self.chunks.empty:
             return []
         topics = set(self.failure_to_topics.get(failure.value, []))
@@ -155,7 +188,9 @@ class TextRetriever:
         # Ensure at least k_min when available.
         if len(chosen) < k_min:
             chosen = scored[:k_min]
-        return [str(self.chunks.iloc[i]["chunk_id"]) for i in chosen]
+        result = [str(self.chunks.iloc[i]["chunk_id"]) for i in chosen]
+        self._cache[cache_key] = result
+        return list(result)
 
 
 # --------------------------------------------------------------------------- #
@@ -225,10 +260,13 @@ class IncidentAssembler:
         if not Path(path).exists():
             return None
         try:
-            head = pd.read_parquet(path)
+            head = pd.read_parquet(path, columns=["az"])
         except Exception:  # noqa: BLE001
-            return None
-        ch = next((c for c in ("az", "ay", "ax") if c in head.columns), None)
+            try:
+                head = pd.read_parquet(path)
+            except Exception:  # noqa: BLE001
+                return None
+        ch = "az" if "az" in head.columns else next((c for c in ("ay", "ax") if c in head.columns), None)
         if ch is None:
             return None
         x = head[ch].to_numpy(dtype="float64")
@@ -242,13 +280,7 @@ class IncidentAssembler:
             sensor = sensor.head(limit)
         summ.discovered = len(sensor)
 
-        # Global amplitude quantiles for severity bucketing.
-        amps = [self._amplitude(f) for f in sensor["sensor_file"]]
-        finite = [a for a in amps if a is not None and np.isfinite(a)]
-        amp_lo = float(np.quantile(finite, 1 / 3)) if finite else None
-        amp_hi = float(np.quantile(finite, 2 / 3)) if finite else None
-
-        deriver = LabelDeriver(amp_lo, amp_hi, self.cfg.assemble.default_label)
+        deriver = LabelDeriver(default_label=self.cfg.assemble.default_label)
         matcher = VideoMatcher(video, self.cfg.assemble.video_match, self.rng)
         retriever = TextRetriever(text, self.cfg.assemble.text_retrieval,
                                   self.cfg.assemble.text_retrieval.failure_to_topics)
@@ -257,9 +289,16 @@ class IncidentAssembler:
         rows: list[IncidentRow] = []
         n_no_video = 0
         n_short_text = 0
-        for pos, (_, sw) in enumerate(sensor.iterrows()):
-            labels = deriver.derive(meta=None, amplitude=amps[pos])
+        for _, sw in sensor.iterrows():
+            labels = deriver.derive(meta=None, amplitude=None)
             failure = FailureFamily(sw.get("failure_family", "unknown"))
+            if failure is FailureFamily.unknown:
+                failure = deriver.weak_failure_family(str(sw["incident_id"]))
+            severity = labels["severity_label"]
+            root_cause = labels["root_cause_label"]
+            if severity is Severity.unknown and failure is not FailureFamily.unknown:
+                severity = deriver.weak_severity(str(sw["incident_id"]))
+                root_cause = f"weak_id_bucket_{failure.value}"
             clip, align = matcher.match(labels["regime_label"], Condition.unknown)
             sop_ids = retriever.retrieve(failure, DocType.sop,
                                          tr.sop_chunks_min, tr.sop_chunks_max)
@@ -299,8 +338,8 @@ class IncidentAssembler:
                     maintenance_chunk_ids=maint_ids,
                     phase_label=labels["phase_label"],
                     regime_label=labels["regime_label"],
-                    severity_label=labels["severity_label"],
-                    root_cause_label=labels["root_cause_label"],
+                    severity_label=severity,
+                    root_cause_label=root_cause,
                     alignment_method=align,
                     split=Split.train,  # placeholder; SplitAssigner sets the real value
                 )
@@ -321,5 +360,8 @@ class IncidentAssembler:
         summ.written = 0 if dry_run else len(rows)
         summ.note("no_video", n_no_video)
         summ.note("short_text", n_short_text)
-        summ.note("split_groups", len({r.source_dataset for r in rows}))
+        summ.note(
+            "split_groups",
+            len({str(getattr(r, self.cfg.assemble.split.group_key, "")) for r in rows}),
+        )
         return summ

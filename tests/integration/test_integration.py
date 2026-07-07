@@ -8,8 +8,6 @@ required: the video stage skips cleanly and the assembler tolerates a null video
 from __future__ import annotations
 
 from pathlib import Path
-
-import pandas as pd
 import pytest
 
 from src.common.errors import AssemblyError

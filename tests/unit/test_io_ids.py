@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import time
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -32,8 +31,6 @@ def test_atomic_write_failure_leaves_original(tmp_path, monkeypatch):  # UT-IO-0
     p = tmp_path / "out.parquet"
     write_parquet_atomic(pd.DataFrame({"a": [1]}), p)
     original = p.read_bytes()
-
-    import src.common.io_utils as io
 
     def boom(self, *a, **k):
         raise OSError("disk full")

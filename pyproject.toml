@@ -16,25 +16,45 @@ dependencies = [
     "numpy>=1.24",
     "scipy>=1.10",
     "typer>=0.9",
+    "streamlit>=1.54",
 ]
 
 [project.optional-dependencies]
 text = ["tiktoken>=0.5", "pypdf>=4.0", "python-docx>=1.1"]
-retrieval = ["rank-bm25>=0.2"]
+retrieval = ["rank-bm25>=0.2", "sentence-transformers>=2.4"]
 eval = ["matplotlib>=3.7"]
+encoder = ["torch>=2.2"]
+decoder = ["llama-cpp-python>=0.3"]
 dev = ["pytest>=7.4", "pytest-cov>=4.1"]
 
 [project.scripts]
 recipe-a = "src.cli:app"
 
 [tool.setuptools]
-packages = ["src", "src.common", "src.etl"]
+packages = [
+    "contracts",
+    "src",
+    "src.common",
+    "src.encoder",
+    "src.etl",
+    "src.eval",
+    "src.explain",
+    "src.fusion",
+    "src.graph",
+    "src.retrieval",
+    "src.temporal",
+    "src.vision",
+    "src.features",
+    "src.tgfx",
+    "src.ui",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
     "ffmpeg: tests that require a real ffmpeg/ffprobe binary on PATH",
+    "browser: browser-level UI smoke tests; opt in with RUN_BROWSER_SMOKE=1",
 ]
 
 [tool.ruff]

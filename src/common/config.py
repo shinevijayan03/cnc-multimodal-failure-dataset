@@ -34,6 +34,9 @@ class PathsCfg(BaseModel):
     video_index: str = "data_processed/video_index.parquet"
     text_chunks: str = "data_processed/text_chunks.parquet"
     incidents_index: str = "data_processed/incidents.parquet"
+    subwindows_index: str = "data_processed/subwindows.parquet"
+    sensor_features_index: str = "data_processed/sensor_features.parquet"
+    vector_store: str = "data_processed/vector_store.parquet"
     logs_dir: str = "logs"
 
 
@@ -146,6 +149,8 @@ class ChunkingCfg(BaseModel):
 
 class TextCfg(BaseModel):
     input_formats: list[str] = Field(default_factory=lambda: ["md", "markdown", "txt", "docx"])
+    max_pages_per_doc: int | None = Field(default=None, ge=1)
+    dry_run_max_pages_per_doc: int | None = Field(default=2, ge=1)
     chunking: ChunkingCfg = Field(default_factory=ChunkingCfg)
     doc_types: list[str] = Field(default_factory=lambda: ["sop", "maintenance"])
     topic_keywords: dict[str, list[str]] = Field(default_factory=dict)
@@ -197,6 +202,61 @@ class AssembleCfg(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Vision / VLM (Build Phase 7)
+# --------------------------------------------------------------------------- #
+class VisionCfg(BaseModel):
+    mode: str = "vlm"                    # vlm | tags_only (transparent fallback)
+    model_name: str = "Qwen/Qwen2.5-VL-3B-Instruct"   # D15: 3B fits 12 GB (D11)
+    device: str = "cuda"
+    n_frames: int = Field(default=8, gt=0)
+    max_new_tokens: int = Field(default=160, gt=0)
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_ok(cls, v: str) -> str:
+        if v not in {"vlm", "tags_only"}:
+            raise ValueError(f"vision.mode '{v}' not in vlm|tags_only")
+        return v
+
+
+# --------------------------------------------------------------------------- #
+# Retrieval index (Build Phase 5)
+# --------------------------------------------------------------------------- #
+class RetrievalIndexCfg(BaseModel):
+    embedder: str = "bge"                # bge | hashing (fallback, clearly named)
+    model_name: str = "BAAI/bge-base-en-v1.5"
+    batch_size: int = Field(default=32, gt=0)
+    device: str = "cuda"                 # D11: local GPU always
+
+    @field_validator("embedder")
+    @classmethod
+    def _embedder_ok(cls, v: str) -> str:
+        if v not in {"bge", "hashing"}:
+            raise ValueError(f"retrieval.embedder '{v}' not in bge|hashing")
+        return v
+
+
+# --------------------------------------------------------------------------- #
+# Encoder (Build Phase 4)
+# --------------------------------------------------------------------------- #
+class EncoderCfg(BaseModel):
+    kind: str = "autoencoder"            # autoencoder | baseline
+    dim: int = Field(default=64, gt=0)   # Hvib embedding dimension
+    hidden: int = Field(default=256, gt=0)
+    epochs: int = Field(default=20, gt=0)
+    batch_size: int = Field(default=64, gt=0)
+    lr: float = Field(default=1e-3, gt=0)
+    device: str = "cuda"                 # D11: local GPU always; cpu only in tests
+
+    @field_validator("kind")
+    @classmethod
+    def _kind_ok(cls, v: str) -> str:
+        if v not in {"autoencoder", "baseline"}:
+            raise ValueError(f"encoder.kind '{v}' not in autoencoder|baseline")
+        return v
+
+
+# --------------------------------------------------------------------------- #
 # Runtime
 # --------------------------------------------------------------------------- #
 class RuntimeCfg(BaseModel):
@@ -218,6 +278,9 @@ class PipelineConfig(BaseModel):
     video: VideoCfg = Field(default_factory=VideoCfg)
     text: TextCfg = Field(default_factory=TextCfg)
     assemble: AssembleCfg = Field(default_factory=AssembleCfg)
+    encoder: EncoderCfg = Field(default_factory=EncoderCfg)
+    retrieval: RetrievalIndexCfg = Field(default_factory=RetrievalIndexCfg)
+    vision: VisionCfg = Field(default_factory=VisionCfg)
     runtime: RuntimeCfg = Field(default_factory=RuntimeCfg)
 
     # Populated by load_config(); the absolute repo root all relative paths resolve against.

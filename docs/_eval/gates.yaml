@@ -1,0 +1,48 @@
+version: 1
+status: eval_meta_seeded
+gates:
+  G0:
+    metric: contract_tests
+    target: pass
+    type: hard
+    description: "Pydantic contract and eval meta-tests pass."
+    implemented: true
+  G1:
+    metric: schema_valid_rate
+    target: 1.0
+    type: hard
+    implemented: true
+  G2:
+    metric: evidence_id_resolvability
+    target: 1.0
+    type: hard
+    implemented: true
+  G3:
+    metric: auroc
+    target: 0.90
+    type: ratchet
+    implemented: fixture_only
+  G4a:
+    metric: iou_sensor
+    target: 0.50
+    type: ratchet
+    implemented: true
+  G4b:
+    metric: iou_video
+    target: report
+    type: report
+    implemented: true
+  G5:
+    metric: unsupported_claim_rate
+    target: 0.20
+    type: ratchet
+    implemented: true
+  G6:
+    metric: attr_precision_attr_recall
+    target: "0.75/0.60"
+    type: ratchet
+    implemented: true
+  deferred:
+    G7_to_G11:
+      description: "Remaining TGFX KPI gates need dataset, baselines, judge study, and RedTeam probes."
+      implemented: false

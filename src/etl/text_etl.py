@@ -96,14 +96,14 @@ def make_tokenizer(kind: str, logger=None) -> Tokenizer:
 class DocReader:
     """Read a document to plain text, keeping markdown headings as boundaries."""
 
-    def read(self, path: Path) -> tuple[str, DocType]:
+    def read(self, path: Path, max_pages: int | None = None) -> tuple[str, DocType]:
         suffix = path.suffix.lower().lstrip(".")
         if suffix in ("md", "markdown", "txt"):
             text = path.read_text(encoding="utf-8", errors="replace")
         elif suffix == "docx":
             text = self._read_docx(path)
         elif suffix == "pdf":
-            text = self._read_pdf(path)
+            text = self._read_pdf(path, max_pages=max_pages)
         else:
             raise ValueError(f"unsupported document format: {path.suffix}")
         return text, self._infer_doc_type(path, text)
@@ -125,14 +125,16 @@ class DocReader:
         return "\n".join(lines)
 
     @staticmethod
-    def _read_pdf(path: Path) -> str:
+    def _read_pdf(path: Path, max_pages: int | None = None) -> str:
         try:
             from pypdf import PdfReader  # noqa: PLC0415
         except ImportError as exc:
             raise RuntimeError("reading .pdf requires pypdf") from exc
         reader = PdfReader(str(path))
         pages = []
-        for page in reader.pages:
+        n_pages = len(reader.pages) if max_pages is None else min(max_pages, len(reader.pages))
+        for i in range(n_pages):
+            page = reader.pages[i]
             pages.append(page.extract_text() or "")
         return "\n\n".join(pages)
 
@@ -231,6 +233,14 @@ def _classify_doc_type(text: str, default: DocType) -> DocType:
     return default
 
 
+def _bounded_pages(max_pages: int | None, dry_run_max_pages: int | None, dry_run: bool) -> int | None:
+    if not dry_run or dry_run_max_pages is None:
+        return max_pages
+    if max_pages is None:
+        return dry_run_max_pages
+    return min(max_pages, dry_run_max_pages)
+
+
 # --------------------------------------------------------------------------- #
 # Orchestration
 # --------------------------------------------------------------------------- #
@@ -257,11 +267,16 @@ class TextETL:
         rows: list[TextChunkRow] = []
         files = self._discover()
         summ.discovered = len(files)
+        max_pages = _bounded_pages(
+            self.cfg.text.max_pages_per_doc,
+            self.cfg.text.dry_run_max_pages_per_doc,
+            dry_run,
+        )
         for path in files:
             if limit is not None and summ.processed >= limit:
                 break
             try:
-                text, default_type = self.reader.read(path)
+                text, default_type = self.reader.read(path, max_pages)
             except Exception as exc:  # noqa: BLE001 - skip unreadable docs
                 summ.bump("skipped")
                 self.log.warning("could not read doc, skipped",

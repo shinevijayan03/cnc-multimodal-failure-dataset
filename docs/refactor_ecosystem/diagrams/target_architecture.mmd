@@ -1,0 +1,38 @@
+flowchart LR
+    ui["Proposed Streamlit UI"] --> appsvc["Proposed application services"]
+    cli["Existing Typer CLI"] --> appsvc
+
+    appsvc --> sensor["Sensor service"]
+    appsvc --> text["Text service"]
+    appsvc --> video["Video service"]
+    appsvc --> assemble["Assembly service"]
+    appsvc --> eval["Evaluation service"]
+
+    cfg["Typed PipelineConfig"] --> appsvc
+    device["Proposed compute device utility"] --> text_gpu["Optional embedding/retrieval acceleration"]
+    device --> bench["Optional performance benchmark"]
+
+    raw["data_raw"] --> sensor
+    raw --> text
+    raw --> video
+
+    sensor --> contracts["Validated Parquet contracts"]
+    text --> contracts
+    video --> contracts
+    contracts --> assemble
+    assemble --> incidents["incidents.parquet"]
+    incidents --> eval
+    eval --> reports["Evaluation reports"]
+
+    appsvc --> logs["Structured logs and RunSummary objects"]
+    ui --> logs
+    ui --> reports
+    ui --> incidents
+
+    subgraph "Stage B proposed additions"
+        ui
+        appsvc
+        device
+        text_gpu
+        bench
+    end
