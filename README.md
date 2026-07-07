@@ -1,4 +1,4 @@
-# CNC Multimodal Failure-Explanation Dataset Pipeline ("Recipe A")
+# CNC Multimodal Failure-Explanation 
 
 Data-engineering pipeline that builds a **multimodal CNC failure-explanation
 dataset** for the dissertation:
