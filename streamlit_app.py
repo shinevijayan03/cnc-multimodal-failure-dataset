@@ -200,24 +200,34 @@ def _load_optional_parquet(path_str: str) -> pd.DataFrame:
 
 @st.cache_data(show_spinner=False)
 def _load_quality_labels() -> dict:
-    from src.encoder.train import load_quality_labels
-    return load_quality_labels()
+    try:
+        from src.encoder.train import load_quality_labels
+        return load_quality_labels()
+    except Exception:  # noqa: BLE001 - chips degrade to "missing", app must render
+        return {}
 
 
 @st.cache_resource(show_spinner="Loading vector store + embedder…")
 def _load_retrieval(store_path: str):
-    """(store, embedder) for live SOP search; None when no index is built."""
+    """(store, embedder) for live SOP search; None when no index is built;
+    an error string when the index exists but the embedder cannot load
+    (GPU busy/unavailable, HF model cache missing/offline). Live search then
+    degrades to the build-time chunk view instead of crashing the whole app —
+    same pattern as the ffmpeg-missing path in video ETL."""
     from pathlib import Path
 
     from src.retrieval.embeddings import build_embedder
     from src.retrieval.store import VectorStore
     if not Path(store_path).exists():
         return None
-    store = VectorStore.load(store_path)
-    kind = "hashing" if store.embedder_name == "hashing_fallback" else "bge"
-    embedder = build_embedder(kind)
-    store.require_embedder(embedder.name)
-    return store, embedder
+    try:
+        store = VectorStore.load(store_path)
+        kind = "hashing" if store.embedder_name == "hashing_fallback" else "bge"
+        embedder = build_embedder(kind)
+        store.require_embedder(embedder.name)
+        return store, embedder
+    except Exception as exc:  # noqa: BLE001 - degrade, never take down the UI
+        return f"{type(exc).__name__}: {exc}"
 
 
 # --------------------------------------------------------------------------- #
@@ -626,7 +636,7 @@ def _render_evidence_panel(incident: pd.Series, linked_cards: list[dict],
     with sop_tab:
         box = st.container(height=400, border=False)
         with box:
-            if retrieval is not None:
+            if isinstance(retrieval, tuple):
                 store, embedder = retrieval
                 query = st.text_input(
                     "Live retrieval (real vector search)",
@@ -638,6 +648,11 @@ def _render_evidence_panel(incident: pd.Series, linked_cards: list[dict],
                                f"embedder: {store.embedder_name} · scores are "
                                f"real cosine similarities")
                     _render_sop_cards(live_retrieval_cards(hits, store.embedder_name))
+            elif isinstance(retrieval, str):
+                st.warning("Live retrieval unavailable — the vector index exists "
+                           "but the embedder failed to load (GPU busy/unavailable "
+                           "or model cache unreachable). Showing build-time chunks "
+                           f"below.\n\n`{retrieval}`")
             else:
                 st.info("No vector index built — run "
                         "`python -m src.retrieval.build_index` (Phase 5).")
